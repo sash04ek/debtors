@@ -36,6 +36,7 @@ class Settings:
     debt_col: str | None = None
     inn_col: str | None = None          # необязательно
     addr_col: str | None = None         # адрес дома (для претензий и фильтра по домам)
+    house_col: str | None = None        # номер дома, если он в отдельной колонке от улицы («Улица» + «Дом»)
     flat_col: str | None = None         # квартира
     type_col: str | None = None         # необязательно: колонка «Тип лица»
     type_value: str = "физ"             # подстрока, означающая физлицо в type_col
@@ -134,10 +135,28 @@ def guess_columns(headers: list[str]) -> dict[str, str | None]:
         "debt_col": find("сумма долга", "задолж", "долг", "сальдо", "сумма", "к оплате",
                          exclude=("дата", "пени", "договор")),
         "inn_col": find("инн"),
-        "addr_col": find("адрес", "дом", "улиц"),
+        "addr_col": find("адрес", "улиц") or find("дом"),
+        "house_col": next((h for h in headers if re.fullmatch(r"\s*(дом|№ дома|номер дома|д\.?)\s*", h.lower())), None),
         "flat_col": find("кв", "помещен"),
         "type_col": find("тип лица", "вид лица", "тип контрагента", "категория", "тип"),
     }
+
+
+def _cell_text(v) -> str:
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))                                    # 114.0 → «114»
+    return str(v).strip()
+
+
+def row_address(row: list, idx: dict, addr_col: str | None, house_col: str | None = None) -> str:
+    """Адрес дома строки: колонка «Адрес» или «Улица» + отдельная колонка с номером дома («10-й пер» + «114»)."""
+    addr = _cell_text(row[idx[addr_col]]) if addr_col and addr_col in idx else ""
+    house = _cell_text(row[idx[house_col]]) if house_col and house_col in idx and house_col != addr_col else ""
+    if house and house not in addr:
+        return f"{addr} {house}".strip()
+    return addr
 
 
 _NUM_CLEAN = re.compile(r"[^\d,.\-]")
@@ -312,11 +331,12 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
         from orgs import norm_addr
         houses = {norm_addr(h["address"]) for h in org.houses}
     ai = idx[s.addr_col] if s.addr_col else None
+    addr_of = lambda r: row_address(r, idx, s.addr_col, s.house_col)
     fi = idx[s.flat_col] if (s.flat_col and s.skip_nonresidential) else None
 
     persons, skipped_org, skipped_amount, other_org, nonres = [], 0, 0, 0, 0
     for r in sheet.rows:
-        if houses is not None and norm_addr(r[ai]) not in houses:
+        if houses is not None and norm_addr(addr_of(r)) not in houses:
             other_org += 1
             continue
         flat = None
@@ -324,7 +344,7 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
             flat = r[fi]
             if flat in (None, "") and ai is not None:
                 from orgs import extract_flat
-                flat = extract_flat(r[ai])                # квартира могла быть записана в адресе: «…-к.1»
+                flat = extract_flat(addr_of(r))           # квартира могла быть записана в адресе: «…-к.1»
         if fi is not None and is_nonresidential(flat):
             nonres += 1
             continue
