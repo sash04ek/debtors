@@ -1927,6 +1927,13 @@ class OwnerDialog(tk.Toplevel):
             self.lb.selection_set(select)
             self.lb.see(select)
 
+    def destroy(self):
+        super().destroy()
+        try:
+            self.app.refresh_card_flags()            # карточка могла измениться — сразу обновляем колонку «Данные»
+        except Exception:
+            pass
+
     def commit(self):
         """Переносит значения полей в текущего собственника."""
         if self._loading or not 0 <= self.cur < len(self.owner_list):
