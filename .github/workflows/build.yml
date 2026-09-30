@@ -1,0 +1,25 @@
+name: Сборка
+on: [push, workflow_dispatch]
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12" }
+      - run: pip install -r requirements.txt pyinstaller
+      - if: runner.os == 'Windows'
+        run: pyinstaller --noconfirm --collect-data petrovich --windowed --onefile --icon assets/icon.ico --add-data "assets/icon.png;assets" --add-data "assets/gear.png;assets" --add-data "assets/gear_hover.png;assets" --name Debtors app.py
+      - if: runner.os == 'macOS'
+        run: |
+          pyinstaller --noconfirm --collect-data petrovich --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --add-data "assets/gear.png:assets" --add-data "assets/gear_hover.png:assets" --name Debtors app.py
+          cd dist && zip -qr Debtors-mac.zip Debtors.app
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Debtors-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.zip
