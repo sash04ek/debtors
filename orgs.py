@@ -1,4 +1,4 @@
-"""Организации: реквизиты, дома, текст претензии. Хранятся в ~/.debtors_orgs.json."""
+"""Организации: реквизиты, дома, текст претензии. Хранятся в ~/.debtors/orgs.json."""
 
 from __future__ import annotations
 
@@ -7,7 +7,9 @@ import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
-ORGS_PATH = Path.home() / ".debtors_orgs.json"
+import storage
+
+ORGS_PATH = storage.ORGS_PATH
 
 # Плейсхолдеры: {org} {agent} {agent_address} {date} {debt} {days}; **текст** — жирный.
 BODY_WITH_AGENT = """В соответствии с представленной {agent} по состоянию на **{date} г.** перед {org} за Вами числится задолженность за предоставленные жилищно-коммунальные услуги в размере **{debt}** рублей.

@@ -15,10 +15,11 @@ import court
 import courts as courtsmod
 import orgs as orgmod
 import owners
+import storage
 from datetime import date
 
-CONFIG_PATH = Path.home() / ".debtors_finder.json"
-STATE_PATH = Path.home() / ".debtors_state.json"     # состояние приложения между запусками
+CONFIG_PATH = storage.SETTINGS_PATH
+STATE_PATH = storage.STATE_PATH                    # состояние приложения между запусками
 NONE = "— нет —"
 SORT_DEBT_LABEL = "Сумма долга"
 DESC_LABEL = "по убыванию (от большего к меньшему)"
@@ -258,6 +259,94 @@ def fmt_money(v: float) -> str:
     return f"{v:,.2f}".replace(",", " ").replace(".", ",")
 
 
+def _mix(root: tk.Misc, fg: str, bg: str, k: float) -> str:
+    """Цвет между текстом и фоном: k=0 — цвет текста, k=1 — цвет фона."""
+    (r1, g1, b1), (r2, g2, b2) = root.winfo_rgb(fg), root.winfo_rgb(bg)
+    return "#%02x%02x%02x" % tuple(int((a + (b - a) * k) / 257) for a, b in ((r1, r2), (g1, g2), (b1, b2)))
+
+
+THEME_LABELS = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}
+DARK_COLORS = {"bg": "#2b2b2b", "fg": "#e6e6e6", "field": "#1e1e1e", "select": "#0a5cc7"}
+
+
+def _is_mac(root: tk.Misc) -> bool:
+    return root.tk.call("tk", "windowingsystem") == "aqua"
+
+
+def _system_dark_windows() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
+    except Exception:
+        return False
+
+
+def set_window_appearance(root: tk.Misc, win: tk.Misc, mode: str) -> None:
+    """macOS: светлое/тёмное оформление окна (auto — как в системе)."""
+    try:
+        root.tk.call("::tk::unsupported::MacWindowStyle", "appearance", win,
+                     {"light": "aqua", "dark": "darkaqua"}.get(mode, "auto"))
+    except tk.TclError:
+        pass
+
+
+def apply_theme(root: tk.Tk, mode: str) -> None:
+    """Применяет тему оформления. На macOS оформление даёт сама система (окна и диалоги);
+    на Windows/Linux светлая — стандартная, тёмная — палитра поверх темы clam."""
+    if _is_mac(root):
+        for w in [root] + [c for c in root.winfo_children() if isinstance(c, tk.Toplevel)]:
+            set_window_appearance(root, w, mode)
+        root.update_idletasks()
+    else:
+        st = ttk.Style(root)
+        dark = mode == "dark" or (mode == "system" and _system_dark_windows())
+        if dark:
+            c = DARK_COLORS
+            st.theme_use("clam")
+            st.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["field"],
+                         troughcolor=c["field"], bordercolor="#444444", lightcolor=c["bg"], darkcolor=c["bg"])
+            st.configure("Treeview", background=c["field"], fieldbackground=c["field"], foreground=c["fg"])
+            st.configure("Treeview.Heading", background="#3a3a3a", foreground=c["fg"])
+            st.map("Treeview", background=[("selected", c["select"])], foreground=[("selected", "#ffffff")])
+            st.map("TCombobox", fieldbackground=[("readonly", c["field"])], foreground=[("readonly", c["fg"])])
+            root.configure(background=c["bg"])
+            for pat, opts in (("Text", {"background": c["field"], "foreground": c["fg"]}),
+                              ("Listbox", {"background": c["field"], "foreground": c["fg"]}),
+                              ("Menu", {"background": c["bg"], "foreground": c["fg"]})):
+                for k, v in opts.items():
+                    root.option_add(f"*{pat}.{k}", v)
+        else:
+            st.theme_use("vista" if "vista" in st.theme_names() else "default")
+            st.map("Treeview", background=[("selected", "#0078d7")], foreground=[("selected", "#ffffff")])
+            root.configure(background=st.lookup("TFrame", "background") or "SystemButtonFace")
+    apply_palette(root)
+
+
+def apply_palette(root: tk.Misc) -> None:
+    """Приглушённый, зелёный и оранжевый цвета подписей и цвет чередования строк берутся от системной темы
+    (светлой или тёмной), а не задаются жёстко, — поэтому читаются и в тёмном режиме."""
+    st = ttk.Style(root)
+    fg = st.lookup("TLabel", "foreground") or "black"
+    bg = st.lookup("TLabel", "background") or "white"
+    field = "systemTextBackgroundColor" if _is_mac(root) else (st.lookup("Treeview", "fieldbackground") or "white")
+    try:
+        dark = sum(root.winfo_rgb(bg)) < 3 * 32768
+        muted = _mix(root, fg, bg, 0.45)
+        stripe = _mix(root, field, fg, 0.07 if dark else 0.04)
+    except tk.TclError:
+        dark, muted, stripe = False, "gray", "#f4f5f5"
+    st.configure("Muted.TLabel", foreground=muted)
+    st.configure("Ok.TLabel", foreground="#5fc27e" if dark else "#2e7d32")
+    st.configure("Warn.TLabel", foreground="#f0a93c" if dark else "#b26a00")
+    st.configure("Status.TLabel", foreground=muted, font="TkSmallCaptionFont")
+    root.stripe_color = stripe
+    tree = getattr(root, "tree", None)
+    if tree is not None:
+        tree.tag_configure("odd", background=stripe)              # чередование строк, как в Finder
+
+
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
@@ -273,6 +362,11 @@ class App(tk.Tk):
         self.minsize(min(900, self.winfo_screenwidth() - 40), 420)
 
         self.settings = load_settings()
+        apply_theme(self, self.settings.theme)
+        self.bind("<<ThemeChanged>>", lambda e: e.widget is self and apply_palette(self), add="+")
+        if _is_mac(self):                                  # новые окна (диалоги) получают то же оформление
+            self.bind_class("Toplevel", "<Map>", lambda e: isinstance(e.widget, tk.Toplevel)
+                            and set_window_appearance(self, e.widget, self.settings.theme), add="+")
         self.path: Path | None = None
         self.sheet: core.Sheet | None = None
         self.result: core.Result | None = None
@@ -291,9 +385,9 @@ class App(tk.Tk):
         top = ttk.Frame(self)
         top.pack(fill="x", **pad)
         ttk.Button(top, text="Открыть Excel…", command=self.open_file).pack(side="left")
-        self.file_lbl = ttk.Label(top, text="Файл не выбран", foreground="gray")
+        self.file_lbl = ttk.Label(top, text="Файл не выбран", style="Muted.TLabel")
         self.file_lbl.pack(side="left", padx=(8, 2))
-        self.kind_lbl = ttk.Label(top, text="", foreground="gray")
+        self.kind_lbl = ttk.Label(top, text="", style="Muted.TLabel")
         self.kind_lbl.pack(side="left", padx=(0, 6))
         ttk.Label(top, text="Лист:").pack(side="left", padx=(16, 2))
         self.sheet_cb = ttk.Combobox(top, state="readonly", width=24)
@@ -317,7 +411,7 @@ class App(tk.Tk):
         ttk.Label(orow, text="Организация:").pack(side="left")
         self.org_cb = ttk.Combobox(orow, state="readonly", width=34)
         self.org_cb.pack(side="left", padx=6)
-        self.org_hint = ttk.Label(orow, text="", foreground="gray")
+        self.org_hint = ttk.Label(orow, text="", style="Muted.TLabel")
         self.org_hint.pack(side="left", padx=10)
         self.refresh_orgs()
         self.org_cb.bind("<<ComboboxSelected>>", lambda e: self.save_state())
@@ -329,6 +423,7 @@ class App(tk.Tk):
         self.ip_as_person = tk.BooleanVar(value=self.settings.ip_as_person)
         self.skip_nonres = tk.BooleanVar(value=self.settings.skip_nonresidential)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
+        self.theme_var = tk.StringVar(value=THEME_LABELS.get(self.settings.theme, THEME_LABELS["system"]))
         self.sort_options = [SORT_DEBT_LABEL]                       # «Сумма долга» + колонки файла (заполняется при загрузке листа)
         self.page_size_var = tk.StringVar(value=str(self.settings.page_size))
         self.sort_var = tk.StringVar(value=self.settings.sort_col or SORT_DEBT_LABEL)
@@ -355,11 +450,12 @@ class App(tk.Tk):
         self.owner_btn = ttk.Button(docs, text="Собственники помещения…", command=self.edit_owner, state="disabled")
         self.owner_btn.pack(side="right")
 
-        # строка состояния внизу окна (пакуется до таблицы, чтобы таблица заняла остальное место)
-        status = ttk.Frame(self, relief="sunken", borderwidth=1)
+        # строка состояния внизу окна, как в Finder: тонкая линия сверху и мелкий приглушённый текст по центру
+        status = ttk.Frame(self)
         status.pack(side="bottom", fill="x")
-        self.stats_lbl = ttk.Label(status, text="Откройте Excel-файл", justify="left", anchor="w")
-        self.stats_lbl.pack(fill="x", padx=8, pady=3)
+        ttk.Separator(status, orient="horizontal").pack(fill="x")
+        self.stats_lbl = ttk.Label(status, text="Откройте Excel-файл", style="Status.TLabel", justify="center", anchor="center")
+        self.stats_lbl.pack(fill="x", padx=10, pady=4)
         status.bind("<Configure>", lambda e: self.stats_lbl.config(wraplength=max(200, e.width - 24)))
 
         pick_bar = ttk.Frame(self)
@@ -368,13 +464,14 @@ class App(tk.Tk):
         self.all_cb = ttk.Checkbutton(pick_bar, text="Выделить / снять всех", variable=self.all_var,
                                       command=self.toggle_all, state="disabled")
         self.all_cb.pack(side="left")
-        self.pick_lbl = ttk.Label(pick_bar, text="", foreground="gray")
+        self.pick_lbl = ttk.Label(pick_bar, text="", style="Muted.TLabel")
         self.pick_lbl.pack(side="left", padx=12)
+        self.bind("<FocusIn>", lambda e: e.widget is self and self.item_index and self.refresh_card_flags())
 
         # пагинация — отдельная строка под таблицей: в одной строке с отметками она не помещалась в окно
         pager_bar = ttk.Frame(self)
         pager_bar.pack(side="bottom", fill="x", padx=8, pady=(0, 2))
-        self.rows_lbl = ttk.Label(pager_bar, text="", foreground="gray")
+        self.rows_lbl = ttk.Label(pager_bar, text="", style="Muted.TLabel")
         self.rows_lbl.pack(side="left")
         pager = ttk.Frame(pager_bar)
         pager.pack(side="right")
@@ -410,10 +507,71 @@ class App(tk.Tk):
         self.tree.bind("<Button-1>", self.on_tree_click)
         self.tree.bind("<space>", self.on_tree_space)
         self.tree.bind("<Double-Button-1>", self.on_tree_double)
+        self._build_context_menu()
+        self._bind_shortcuts()
+        apply_palette(self)
         ys.grid(row=0, column=1, sticky="ns")
         xs.grid(row=1, column=0, sticky="we")
         table.rowconfigure(0, weight=1)
         table.columnconfigure(0, weight=1)
+
+    # ---------- горячие клавиши и контекстное меню ----------
+    def _bind_shortcuts(self):
+        mod = "Command" if self.tk.call("tk", "windowingsystem") == "aqua" else "Control"
+
+        def guarded(fn):
+            def handler(event=None):
+                # в полях ввода клавиши работают как обычно
+                if isinstance(getattr(event, "widget", None), (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox)):
+                    return None
+                fn()
+                return "break"
+            return handler
+
+        self.bind_all(f"<{mod}-o>", lambda e: (self.open_file(), "break")[1])
+        self.bind_all(f"<{mod}-comma>", lambda e: (self.open_settings(), "break")[1])
+        self.bind_all(f"<{mod}-a>", guarded(self._select_all_rows), add="+")
+        self.bind_all("<F5>", lambda e: (self.on_filter_button(), "break")[1])
+        self.bind_all(f"<{mod}-Return>", lambda e: (self.on_filter_button(), "break")[1])
+        self.tree.bind(f"<{mod}-c>", lambda e: (self.copy_rows(), "break")[1])
+        Tooltip(self.filter_btn, f"Применить или сбросить фильтр (F5, {'⌘' if mod == 'Command' else 'Ctrl+'}Enter)")
+
+    def _select_all_rows(self):
+        if self.focus_get() is self.tree:
+            self.tree.selection_set(self.tree.get_children())
+
+    def _build_context_menu(self):
+        self.ctx = tk.Menu(self, tearoff=0)
+        self.ctx.add_command(label="Собственники помещения…", command=self.edit_owner)
+        self.ctx.add_command(label="Отметить / снять отметку", command=self._toggle_selected)
+        self.ctx.add_separator()
+        self.ctx.add_command(label="Копировать строки", command=self.copy_rows)
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self.tree.bind(seq, self.show_context_menu, add="+")
+
+    def show_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
+        if item not in self.tree.selection():
+            self.tree.selection_set(item)
+        owner_ok = bool(self.result and self.result.top and self.has_checks)
+        self.ctx.entryconfig(0, state="normal" if owner_ok else "disabled")
+        self.ctx.entryconfig(1, state="normal" if self.has_checks else "disabled")
+        self.ctx.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    def _toggle_selected(self):
+        for item in self.tree.selection():
+            self._toggle_item(item)
+        self.refresh_pick_state()
+
+    def copy_rows(self):
+        rows = ["\t".join(str(v) for v in self.tree.item(i, "values")[3 if self.has_checks else 0:])
+                for i in self.tree.selection()]
+        if rows:
+            self.clipboard_clear()
+            self.clipboard_append("\n".join(rows))
 
     # ---------- действия ----------
     def open_file(self):
@@ -437,7 +595,7 @@ class App(tk.Tk):
                                                "Поддерживаются форматы .xlsx и .xls.")
             return False
         self.path = path
-        self.file_lbl.config(text=self.path.name, foreground="")
+        self.file_lbl.config(text=self.path.name, style="TLabel")
         self.sheet_cb["values"] = names
         chosen = sheet if sheet in names else names[0]
         self.sheet_cb.set(chosen)
@@ -455,7 +613,7 @@ class App(tk.Tk):
             return False
         meta, headers = data["meta"], data["headers"]
         self.path, self.kind, self.file_meta = path, "filtered", meta
-        self.file_lbl.config(text=path.name, foreground="")
+        self.file_lbl.config(text=path.name, style="TLabel")
         self.sheet_cb["values"] = [data["sheet"]]
         self.sheet_cb.set(data["sheet"])
         self.sheet = core.Sheet(headers, data["rows"], meta.get("title", ""))
@@ -486,7 +644,7 @@ class App(tk.Tk):
             f"Отфильтрованный список: записей {len(self.result.top)} · сумма: {fmt_money(sum(self.result.amounts))}"
             + (f" · исходный файл: {src}" if src else "")
             + (f" · строк в исходном: {st['всего строк']}" if st.get("всего строк") else "")))
-        self.kind_lbl.config(text="· отфильтрованный список", foreground="#2e7d32")
+        self.kind_lbl.config(text="· отфильтрованный список", style="Ok.TLabel")
         self.filter_btn.config(text="Уже отфильтрован", state="disabled")
         self.save_state()
         return True
@@ -498,7 +656,7 @@ class App(tk.Tk):
             messagebox.showerror("Ошибка", f"Не удалось прочитать лист:\n{e}")
             return
         self.kind, self.file_meta = "original", {}
-        self.kind_lbl.config(text="· исходный файл", foreground="gray")
+        self.kind_lbl.config(text="· исходный файл", style="Muted.TLabel")
         self.filter_btn.config(state="normal")
         headers = self.sheet.headers
         guess = core.guess_columns(headers)
@@ -723,7 +881,12 @@ class App(tk.Tk):
     def refresh_pick_state(self):
         n, total = sum(self.check_state), len(self.check_state)
         self.all_var.set(total > 0 and n == total)
-        self.pick_lbl.config(text=f"Отмечено адресов: {n} из {total}" if self.has_checks else "")
+        text = ""
+        if self.has_checks:
+            text = f"Отмечено адресов: {n} из {total}"
+            if self.result and len(self.result.amounts) == total:
+                text += f" · долг отмеченных: {fmt_money(sum(a for a, on in zip(self.result.amounts, self.check_state) if on))}"
+        self.pick_lbl.config(text=text)
         self.save_state()
 
     def toggle_all(self):
@@ -965,6 +1128,7 @@ class App(tk.Tk):
         s.ip_as_person = self.ip_as_person.get()
         s.skip_nonresidential = self.skip_nonres.get()
         s.restore_state = self.restore_var.get()
+        s.theme = next((k for k, v in THEME_LABELS.items() if v == self.theme_var.get()), "system")
         s.sort_col = None if self.sort_var.get() in ("", SORT_DEBT_LABEL) else self.sort_var.get()
         s.sort_desc = self.sort_dir_var.get() != ASC_LABEL
         try:
@@ -1059,23 +1223,24 @@ class App(tk.Tk):
 
     def show_rows(self, headers, rows, numbered=False):
         """Загружает данные в таблицу и показывает первую страницу. numbered — режим результата (✓, №, отметки)."""
-        self.cols = (["✓", "№"] if numbered else []) + list(headers)
+        self.cols = (["✓", "№", "Данные"] if numbered else []) + list(headers)
         self.has_checks = numbered
         self.data_rows = [["" if v is None else v for v in r] for r in rows]
         self.check_state = [True] * len(rows) if numbered else []
         self.order = list(range(len(rows)))
         self.view_sort = None
         self.page = 0
+        self.compute_card_flags()
         self.col_titles = {f"c{i}": h for i, h in enumerate(self.cols)}
         self.tree["columns"] = [f"c{i}" for i in range(len(self.cols))]
         for i, h in enumerate(self.cols):
             self.tree.heading(f"c{i}", text=h, command=lambda c=f"c{i}": self.sort_view(c))
-            small = numbered and h in ("✓", "№")
-            self.tree.column(f"c{i}", width=(36 if h == "✓" else 46) if small else col_width(h),
+            small = numbered and h in SERVICE_COLS
+            self.tree.column(f"c{i}", width=SERVICE_COLS[h] if small else col_width(h),
                              minwidth=36 if small else 50, stretch=False, anchor="center" if small else "w")
-        self.col_weights = {f"c{i}": (36 if h == "✓" else 46) if (numbered and h in ("✓", "№")) else col_width(h)
+        self.col_weights = {f"c{i}": SERVICE_COLS[h] if (numbered and h in SERVICE_COLS) else col_width(h)
                             for i, h in enumerate(self.cols)}
-        self.fixed_cols = {f"c{i}" for i, h in enumerate(self.cols) if numbered and h in ("✓", "№")}
+        self.fixed_cols = {f"c{i}" for i, h in enumerate(self.cols) if numbered and h in SERVICE_COLS}
         self.all_cb.config(state="normal" if numbered and rows else "disabled")
         self.fit_columns()
         self.render_page()
@@ -1115,6 +1280,12 @@ class App(tk.Tk):
         self.render_page()
         self.save_settings_now()
 
+    def change_theme(self):
+        """Тема выбрана в настройках: применяется сразу и запоминается."""
+        self.settings.theme = self.collect_settings().theme
+        apply_theme(self, self.settings.theme)
+        self.save_settings_now()
+
     def save_settings_now(self):
         try:
             save_settings(self.collect_settings())
@@ -1131,8 +1302,8 @@ class App(tk.Tk):
         self.item_index = {}
         for pos in range(start, min(start + size, len(self.order))):
             idx = self.order[pos]
-            vals = ([("☑" if self.check_state[idx] else "☐"), idx + 1] if self.has_checks else []) + self.data_rows[idx]
-            self.item_index[self.tree.insert("", "end", values=vals)] = idx
+            vals = ([("☑" if self.check_state[idx] else "☐"), idx + 1, "✓" if self.card_flags[idx] else ""] if self.has_checks else []) + self.data_rows[idx]
+            self.item_index[self.tree.insert("", "end", values=vals, tags=("odd",) if pos % 2 else ())] = idx
         total, tp = len(self.order), self.total_pages()
         self.page_lbl.config(text=f"Стр. {self.page + 1} из {tp}")
         self.rows_lbl.config(text=f"строки {start + 1 if total else 0}–{min(start + size, total)} из {total}")
@@ -1143,6 +1314,30 @@ class App(tk.Tk):
             b.state([fwd])
         self.refresh_pick_state()
 
+    def compute_card_flags(self):
+        """Для каждой строки результата: есть ли карточка с персональными данными собственника."""
+        n = len(self.data_rows) if self.has_checks else 0
+        self.card_flags = [False] * n
+        if not (n and self.result and self.result.top and self.settings.addr_col and self.settings.flat_col):
+            return
+        cards = owners._load_all()
+        for idx in range(min(n, len(self.result.top))):
+            info = self.row_info(idx)
+            d = cards.get(owners.make_key(info["address"], info["flat"]))
+            if d:
+                self.card_flags[idx] = any(getattr(o, k).strip() for o in owners._from_dict(d).owners
+                                           for k in owners.OWNER_FIELDS)
+
+    def refresh_card_flags(self):
+        """Карточки могли измениться в диалоге — обновляем колонку «Данные» на видимой странице."""
+        if not self.has_checks:
+            return
+        self.compute_card_flags()
+        for item, idx in self.item_index.items():
+            vals = list(self.tree.item(item, "values"))
+            vals[2] = "✓" if self.card_flags[idx] else ""
+            self.tree.item(item, values=vals)
+
     def sort_view(self, colid: str):
         """Сортировка таблицы кликом по заголовку — по всему списку, а не только по видимой странице.
         Первый клик — по возрастанию, повторный — по убыванию. Меняет только порядок показа;
@@ -1150,11 +1345,13 @@ class App(tk.Tk):
         if not self.order:
             return
         ci = int(colid[1:])
-        j = ci - (2 if self.has_checks else 0)                    # позиция в data_rows
+        j = ci - (3 if self.has_checks else 0)                    # позиция в data_rows
         if self.has_checks and ci == 0:
             getter = lambda idx: 1 if self.check_state[idx] else 0
         elif self.has_checks and ci == 1:
             getter = lambda idx: idx + 1
+        elif self.has_checks and ci == 2:
+            getter = lambda idx: 1 if self.card_flags[idx] else 0
         else:
             getter = lambda idx: self.data_rows[idx][j]
         desc = bool(self.view_sort and self.view_sort[0] == colid and not self.view_sort[1])
@@ -1169,6 +1366,8 @@ class App(tk.Tk):
         for cid, title in self.col_titles.items():
             self.tree.heading(cid, text=title + (("  ▼" if desc else "  ▲") if cid == colid else ""))
 
+
+SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64}      # служебные колонки таблицы результата и их ширина
 
 COLUMN_FIELDS = {
     "name_col": "ФИО *",
@@ -1201,7 +1400,7 @@ class SettingsDialog(tk.Toplevel):
                          values=app.col_options[key]).grid(row=row, column=1, sticky="we", padx=(10, 0), pady=3)
         cols.columnconfigure(1, weight=1)
         if not app.sheet:
-            ttk.Label(cols, text="Колонки появятся после открытия файла.", foreground="gray").grid(
+            ttk.Label(cols, text="Колонки появятся после открытия файла.", style="Muted.TLabel").grid(
                 row=len(COLUMN_FIELDS), column=0, columnspan=2, sticky="w", pady=(6, 0))
 
         rules = ttk.LabelFrame(body, text="Отбор", padding=8)
@@ -1223,13 +1422,23 @@ class SettingsDialog(tk.Toplevel):
         ttk.Combobox(srow, textvariable=app.sort_dir_var, values=[DESC_LABEL, ASC_LABEL], state="readonly",
                      width=34).pack(side="left")
         ttk.Label(rules, text="Сортировка применяется до отбора: в список попадают первые N должников в этом порядке.",
-                  foreground="gray").pack(anchor="w", pady=(2, 0))
+                  style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
         ttk.Button(rules, text="Признаки организаций…", command=app.edit_markers).pack(anchor="w", pady=(8, 0))
+
+        look = ttk.LabelFrame(body, text="Внешний вид", padding=8)
+        look.pack(fill="x", pady=(10, 0))
+        lrow = ttk.Frame(look)
+        lrow.pack(fill="x")
+        ttk.Label(lrow, text="Тема:").pack(side="left")
+        theme_cb = ttk.Combobox(lrow, textvariable=app.theme_var, values=list(THEME_LABELS.values()),
+                                state="readonly", width=18)
+        theme_cb.pack(side="left", padx=8)
+        theme_cb.bind("<<ComboboxSelected>>", lambda e: app.change_theme())
 
         orgs = ttk.LabelFrame(body, text="Организации", padding=8)
         orgs.pack(fill="x", pady=(10, 0))
         ttk.Label(orgs, text="Реквизиты, дома, тексты претензий, письма и заявлений для каждой организации.",
-                  foreground="gray", wraplength=420, justify="left").pack(anchor="w")
+                  style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w")
         ttk.Button(orgs, text="Организации…", command=app.edit_orgs).pack(anchor="w", pady=(6, 0))
 
         cf = ttk.LabelFrame(body, text="Судебные участки", padding=8)
@@ -1239,7 +1448,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(line2, text="Коды регионов:").pack(side="left")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])
         ttk.Entry(line2, textvariable=self.regions, width=14).pack(side="left", padx=6)
-        ttk.Label(line2, text="(61 — Ростовская обл.; несколько — через запятую)", foreground="gray").pack(side="left")
+        ttk.Label(line2, text="(61 — Ростовская обл.; несколько — через запятую)", style="Muted.TLabel").pack(side="left")
         self.courts_lbl = ttk.Label(cf, text="", wraplength=420, justify="left")
         self.courts_lbl.pack(anchor="w", pady=(6, 0))
         brow = ttk.Frame(cf)
@@ -1456,10 +1665,10 @@ class CourtEditDialog(tk.Toplevel):
         ttk.Label(body, text="Адрес суда").pack(anchor="w", pady=(8, 0))
         self.address = tk.StringVar(value=court.address)
         ttk.Entry(body, textvariable=self.address, width=64).pack(fill="x")
-        ttk.Label(body, text=f"Адрес в списке sudrf.ru: {court.base_address or court.address}", foreground="gray",
+        ttk.Label(body, text=f"Адрес в списке sudrf.ru: {court.base_address or court.address}", style="Muted.TLabel",
                   wraplength=520, justify="left").pack(anchor="w", pady=(4, 0))
         ttk.Label(body, text="Правки запоминаются и не пропадают при обновлении списка участков.",
-                  foreground="gray").pack(anchor="w", pady=(2, 0))
+                  style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(12, 0))
         ttk.Button(btns, text="Сохранить", command=self.save).pack(side="right")
@@ -1490,7 +1699,7 @@ class CourtsEditorDialog(tk.Toplevel):
         self.query = tk.StringVar()
         ttk.Entry(top, textvariable=self.query).pack(side="left", fill="x", expand=True, padx=6)
         self.query.trace_add("write", lambda *a: self.refresh())
-        ttk.Label(top, text="✎ — данные изменены вручную", foreground="gray").pack(side="left")
+        ttk.Label(top, text="✎ — данные изменены вручную", style="Muted.TLabel").pack(side="left")
 
         box = ttk.Frame(self, padding=(12, 8, 12, 0))
         box.pack(fill="both", expand=True)
@@ -1510,7 +1719,7 @@ class CourtsEditorDialog(tk.Toplevel):
         form = ttk.LabelFrame(self, text="Правка", padding=10)
         form.pack(fill="x", padx=12, pady=10)
         self.sel_lbl = ttk.Label(form, text="Выберите участок в списке (можно несколько: Shift/Cmd-клик, Cmd+A — все)",
-                                 foreground="gray")
+                                 style="Muted.TLabel")
         self.sel_lbl.grid(row=0, column=0, columnspan=2, sticky="w")
         ttk.Label(form, text="Мировой судья (ФИО)").grid(row=1, column=0, sticky="w", pady=(6, 0))
         self.judge = tk.StringVar()
@@ -1524,7 +1733,7 @@ class CourtsEditorDialog(tk.Toplevel):
         row.grid(row=5, column=0, columnspan=2, sticky="we", pady=(10, 0))
         ttk.Button(row, text="Сохранить", command=self.apply).pack(side="left")
         ttk.Button(row, text="Сбросить правки у выбранных", command=self.reset).pack(side="left", padx=6)
-        self.hint = ttk.Label(row, text="", foreground="gray")
+        self.hint = ttk.Label(row, text="", style="Muted.TLabel")
         self.hint.pack(side="left", padx=8)
         ttk.Button(row, text="Закрыть", command=self.destroy).pack(side="right")
         self.bind("<Escape>", lambda e: self.destroy())
@@ -1551,19 +1760,19 @@ class CourtsEditorDialog(tk.Toplevel):
             self.judge_entry.state(["!disabled"])
             self.judge.set(sel[0].judge)
             self.address.set(sel[0].address)
-            self.sel_lbl.config(text=sel[0].name, foreground="")
+            self.sel_lbl.config(text=sel[0].name, style="TLabel")
             self.hint.config(text="")
         elif len(sel) > 1:
             self.judge.set("")
             self.judge_entry.state(["disabled"])                 # ФИО судьи у каждого участка своё
             addrs = {c.address for c in sel}
             self.address.set(addrs.pop() if len(addrs) == 1 else "")
-            self.sel_lbl.config(text=f"Выбрано участков: {len(sel)} — адрес будет задан всем сразу", foreground="")
+            self.sel_lbl.config(text=f"Выбрано участков: {len(sel)} — адрес будет задан всем сразу", style="TLabel")
             self.hint.config(text="судью задают по одному участку")
         else:
             self.judge_entry.state(["!disabled"])
             self.sel_lbl.config(text="Выберите участок в списке (можно несколько: Shift/Cmd-клик, Cmd+A — все)",
-                                foreground="gray")
+                                style="Muted.TLabel")
 
     def apply(self):
         sel = self._selected()
@@ -1624,9 +1833,9 @@ class CourtPicker(ttk.Frame):
     def _show_info(self):
         c = courtsmod.find_by_code(self.courts, self.code)
         if c:
-            self.info.config(text=f"{c.name}\nСудья: {c.judge or 'не указан'}\n{c.address}", foreground="#2e7d32")
+            self.info.config(text=f"{c.name}\nСудья: {c.judge or 'не указан'}\n{c.address}", style="Ok.TLabel")
         else:
-            self.info.config(text="Участок не выбран", foreground="gray")
+            self.info.config(text="Участок не выбран", style="Muted.TLabel")
         self.edit_btn.state(["!disabled"] if c else ["disabled"])
 
     def _edit(self):
@@ -1738,7 +1947,7 @@ class OwnerDialog(tk.Toplevel):
         flat = claim.clean_flat(info["flat"])
         ttk.Label(head, text=f"{info['address']}, кв. {flat}", font=("", 13, "bold")).pack(anchor="w")
         ttk.Label(head, text=f"В отчёте: {info['report_fio']} · долг {fmt_money(info['debt'])}",
-                  foreground="gray").pack(anchor="w")
+                  style="Muted.TLabel").pack(anchor="w")
         self.mode_lbl = ttk.Label(head, text="", wraplength=620, justify="left")
         self.mode_lbl.pack(anchor="w", pady=(4, 0))
 
@@ -1760,7 +1969,7 @@ class OwnerDialog(tk.Toplevel):
         obox = ttk.LabelFrame(form, text="Собственники помещения", padding=8)
         obox.pack(fill="x", pady=(0, 8), padx=(0, 10))
         ttk.Label(obox, text="Заявление формируется на каждого собственника; в каждом указаны все собственники.",
-                  foreground="gray", wraplength=600, justify="left").pack(anchor="w")
+                  style="Muted.TLabel", wraplength=600, justify="left").pack(anchor="w")
         lrow = ttk.Frame(obox)
         lrow.pack(fill="x", pady=(6, 6))
         self.lb = tk.Listbox(lrow, height=4, exportselection=False, activestyle="none")
@@ -1832,6 +2041,13 @@ class OwnerDialog(tk.Toplevel):
             self.lb.selection_set(select)
             self.lb.see(select)
 
+    def destroy(self):
+        super().destroy()
+        try:
+            self.app.refresh_card_flags()            # карточка могла измениться — сразу обновляем колонку «Данные»
+        except Exception:
+            pass
+
     def commit(self):
         """Переносит значения полей в текущего собственника."""
         if self._loading or not 0 <= self.cur < len(self.owner_list):
@@ -1890,12 +2106,12 @@ class OwnerDialog(tk.Toplevel):
         probe = owners.Card(unknown=bool(self.unknown.get()), owners=[replace(o) for o in self.owner_list])
         people = probe.people(report)
         if not people:
-            self.mode_lbl.config(text="Шаблон заявления: собственник НЕИЗВЕСТЕН (1 заявление)", foreground="#b26a00")
+            self.mode_lbl.config(text="Шаблон заявления: собственник НЕИЗВЕСТЕН (1 заявление)", style="Warn.TLabel")
             return
         text = f"Заявлений будет: {len(people)}"
         if len(people) > 1:
             text += " — по одному на каждого собственника\nСумма долга и пеней в каждом заявлении указывается полностью."
-        self.mode_lbl.config(text=text, foreground="#2e7d32")
+        self.mode_lbl.config(text=text, style="Ok.TLabel")
 
     def take_report_fio(self):
         self.ovars["fio"].set(owners.normalize_fio(str(self.info["report_fio"])))
@@ -1977,7 +2193,7 @@ class HousesEditor(ttk.Frame):
         ttk.Button(crow, text="Назначить выбранным домам", command=self.assign).pack(side="left")
         if not self.courts:
             ttk.Label(self, text="Список участков не загружен: настройки (шестерёнка) → «Судебные участки» → «Загрузить список».",
-                      foreground="#b26a00").pack(anchor="w", pady=(4, 0))
+                      style="Warn.TLabel").pack(anchor="w", pady=(4, 0))
 
     # --- участки ---
     def _source(self, query: str):
@@ -2157,7 +2373,7 @@ class OrgDialog(tk.Toplevel):
         # --- вкладка «Шапка»: реквизиты организации в верхней части документов ---
         def htext(label, hint, height):
             ttk.Label(hd, text=label, font=("", 12, "bold")).pack(anchor="w", pady=(6, 0))
-            ttk.Label(hd, text=hint, foreground="gray", wraplength=720, justify="left").pack(anchor="w")
+            ttk.Label(hd, text=hint, style="Muted.TLabel", wraplength=720, justify="left").pack(anchor="w")
             t = tk.Text(hd, height=height, wrap="word")
             t.pack(fill="both", expand=True, pady=(4, 8))
             return t
@@ -2199,7 +2415,7 @@ class OrgDialog(tk.Toplevel):
             ttk.Entry(h, textvariable=self.c_vars[key]).pack(fill="x", pady=(0, 4))
         ttk.Label(h, text="Шапка заявления берётся со вкладки «Шапка»; подписант — со вкладки «Письмо в ЕИРЦ». Судебный участок закрепляется за домом на вкладке «Дома» или выбирается в карточке помещения и при формировании заявлений.",
                   wraplength=760, justify="left",
-                  foreground="gray").pack(anchor="w", pady=(8, 0))
+                  style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
         ttk.Button(left, text="Сохранить и закрыть", command=self.save).pack(fill="x", pady=(16, 0))
         self.refresh(selected)
