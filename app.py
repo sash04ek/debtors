@@ -370,6 +370,9 @@ class App(tk.Tk):
         self.all_cb.pack(side="left")
         self.pick_lbl = ttk.Label(pick_bar, text="", foreground="gray")
         self.pick_lbl.pack(side="left", padx=12)
+        self.nocard_lbl = ttk.Label(pick_bar, text="", foreground="gray")
+        self.nocard_lbl.pack(side="left")
+        self.bind("<FocusIn>", lambda e: e.widget is self and self.item_index and self.mark_missing_cards())
 
         # пагинация — отдельная строка под таблицей: в одной строке с отметками она не помещалась в окно
         pager_bar = ttk.Frame(self)
@@ -1198,6 +1201,7 @@ class App(tk.Tk):
             idx = self.order[pos]
             vals = ([("☑" if self.check_state[idx] else "☐"), idx + 1] if self.has_checks else []) + self.data_rows[idx]
             self.item_index[self.tree.insert("", "end", values=vals)] = idx
+        self.mark_missing_cards()
         total, tp = len(self.order), self.total_pages()
         self.page_lbl.config(text=f"Стр. {self.page + 1} из {tp}")
         self.rows_lbl.config(text=f"строки {start + 1 if total else 0}–{min(start + size, total)} из {total}")
@@ -1207,6 +1211,22 @@ class App(tk.Tk):
         for b in (self.next_btn, self.last_btn):
             b.state([fwd])
         self.refresh_pick_state()
+
+    def mark_missing_cards(self):
+        """Строки, для которых ещё нет карточки собственника, подсвечиваются — сразу видно, что заполнить."""
+        self.tree.tag_configure("nocard", background="#fff4cc", foreground="#000000")
+        cards = owners._load_all() if (self.has_checks and self.result and self.result.top
+                                       and self.settings.addr_col and self.settings.flat_col) else None
+        missing = 0
+        for item, idx in self.item_index.items():
+            if cards is None or idx >= len(self.result.top):
+                self.tree.item(item, tags=())
+                continue
+            info = self.row_info(idx)
+            has = owners.make_key(info["address"], info["flat"]) in cards
+            self.tree.item(item, tags=() if has else ("nocard",))
+            missing += 0 if has else 1
+        self.nocard_lbl.config(text=f"· без карточки собственника (жёлтые): {missing}" if missing else "")
 
     def sort_view(self, colid: str):
         """Сортировка таблицы кликом по заголовку — по всему списку, а не только по видимой странице.
