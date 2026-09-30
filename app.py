@@ -264,28 +264,91 @@ def _mix(root: tk.Misc, fg: str, bg: str, k: float) -> str:
     return "#%02x%02x%02x" % tuple(int((a + (b - a) * k) / 257) for a, b in ((r1, r2), (g1, g2), (b1, b2)))
 
 
+THEME_LABELS = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}
+DARK_COLORS = {"bg": "#2b2b2b", "fg": "#e6e6e6", "field": "#1e1e1e", "select": "#0a5cc7"}
+
+
+def _is_mac(root: tk.Misc) -> bool:
+    return root.tk.call("tk", "windowingsystem") == "aqua"
+
+
+def _system_dark_windows() -> bool:
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,
+                            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return winreg.QueryValueEx(k, "AppsUseLightTheme")[0] == 0
+    except Exception:
+        return False
+
+
+def set_window_appearance(root: tk.Misc, win: tk.Misc, mode: str) -> None:
+    """macOS: светлое/тёмное оформление окна (auto — как в системе)."""
+    try:
+        root.tk.call("::tk::unsupported::MacWindowStyle", "appearance", win,
+                     {"light": "aqua", "dark": "darkaqua"}.get(mode, "auto"))
+    except tk.TclError:
+        pass
+
+
+def apply_theme(root: tk.Tk, mode: str) -> None:
+    """Применяет тему оформления. На macOS оформление даёт сама система (окна и диалоги);
+    на Windows/Linux светлая — стандартная, тёмная — палитра поверх темы clam."""
+    if _is_mac(root):
+        for w in [root] + [c for c in root.winfo_children() if isinstance(c, tk.Toplevel)]:
+            set_window_appearance(root, w, mode)
+        root.update_idletasks()
+    else:
+        st = ttk.Style(root)
+        dark = mode == "dark" or (mode == "system" and _system_dark_windows())
+        if dark:
+            c = DARK_COLORS
+            st.theme_use("clam")
+            st.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["field"],
+                         troughcolor=c["field"], bordercolor="#444444", lightcolor=c["bg"], darkcolor=c["bg"])
+            st.configure("Treeview", background=c["field"], fieldbackground=c["field"], foreground=c["fg"])
+            st.configure("Treeview.Heading", background="#3a3a3a", foreground=c["fg"])
+            st.map("Treeview", background=[("selected", c["select"])], foreground=[("selected", "#ffffff")])
+            st.map("TCombobox", fieldbackground=[("readonly", c["field"])], foreground=[("readonly", c["fg"])])
+            root.configure(background=c["bg"])
+            for pat, opts in (("Text", {"background": c["field"], "foreground": c["fg"]}),
+                              ("Listbox", {"background": c["field"], "foreground": c["fg"]}),
+                              ("Menu", {"background": c["bg"], "foreground": c["fg"]})):
+                for k, v in opts.items():
+                    root.option_add(f"*{pat}.{k}", v)
+        else:
+            st.theme_use("vista" if "vista" in st.theme_names() else "default")
+            st.map("Treeview", background=[("selected", "#0078d7")], foreground=[("selected", "#ffffff")])
+            root.configure(background=st.lookup("TFrame", "background") or "SystemButtonFace")
+    apply_palette(root)
+
+
 def apply_palette(root: tk.Misc) -> None:
-    """Приглушённый, зелёный и оранжевый цвета подписей берутся от системной темы (светлой или тёмной),
-    а не задаются жёстко, — поэтому читаются и в тёмном режиме."""
+    """Приглушённый, зелёный и оранжевый цвета подписей и цвет чередования строк берутся от системной темы
+    (светлой или тёмной), а не задаются жёстко, — поэтому читаются и в тёмном режиме."""
     st = ttk.Style(root)
     fg = st.lookup("TLabel", "foreground") or "black"
     bg = st.lookup("TLabel", "background") or "white"
+    field = "systemTextBackgroundColor" if _is_mac(root) else (st.lookup("Treeview", "fieldbackground") or "white")
     try:
         dark = sum(root.winfo_rgb(bg)) < 3 * 32768
         muted = _mix(root, fg, bg, 0.45)
+        stripe = _mix(root, field, fg, 0.07 if dark else 0.04)
     except tk.TclError:
-        dark, muted = False, "gray"
+        dark, muted, stripe = False, "gray", "#f4f5f5"
     st.configure("Muted.TLabel", foreground=muted)
     st.configure("Ok.TLabel", foreground="#5fc27e" if dark else "#2e7d32")
     st.configure("Warn.TLabel", foreground="#f0a93c" if dark else "#b26a00")
     st.configure("Status.TLabel", foreground=muted, font="TkSmallCaptionFont")
+    root.stripe_color = stripe
+    tree = getattr(root, "tree", None)
+    if tree is not None:
+        tree.tag_configure("odd", background=stripe)              # чередование строк, как в Finder
 
 
 class App(tk.Tk):
     def __init__(self):
         super().__init__()
-        apply_palette(self)
-        self.bind("<<ThemeChanged>>", lambda e: e.widget is self and apply_palette(self), add="+")
         self.title("Должники")
         try:
             self._icon = tk.PhotoImage(file=str(resource_path("assets/icon.png")))
@@ -298,6 +361,11 @@ class App(tk.Tk):
         self.minsize(min(900, self.winfo_screenwidth() - 40), 420)
 
         self.settings = load_settings()
+        apply_theme(self, self.settings.theme)
+        self.bind("<<ThemeChanged>>", lambda e: e.widget is self and apply_palette(self), add="+")
+        if _is_mac(self):                                  # новые окна (диалоги) получают то же оформление
+            self.bind_class("Toplevel", "<Map>", lambda e: isinstance(e.widget, tk.Toplevel)
+                            and set_window_appearance(self, e.widget, self.settings.theme), add="+")
         self.path: Path | None = None
         self.sheet: core.Sheet | None = None
         self.result: core.Result | None = None
@@ -354,6 +422,7 @@ class App(tk.Tk):
         self.ip_as_person = tk.BooleanVar(value=self.settings.ip_as_person)
         self.skip_nonres = tk.BooleanVar(value=self.settings.skip_nonresidential)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
+        self.theme_var = tk.StringVar(value=THEME_LABELS.get(self.settings.theme, THEME_LABELS["system"]))
         self.sort_options = [SORT_DEBT_LABEL]                       # «Сумма долга» + колонки файла (заполняется при загрузке листа)
         self.page_size_var = tk.StringVar(value=str(self.settings.page_size))
         self.sort_var = tk.StringVar(value=self.settings.sort_col or SORT_DEBT_LABEL)
@@ -439,6 +508,7 @@ class App(tk.Tk):
         self.tree.bind("<Double-Button-1>", self.on_tree_double)
         self._build_context_menu()
         self._bind_shortcuts()
+        apply_palette(self)
         ys.grid(row=0, column=1, sticky="ns")
         xs.grid(row=1, column=0, sticky="we")
         table.rowconfigure(0, weight=1)
@@ -1057,6 +1127,7 @@ class App(tk.Tk):
         s.ip_as_person = self.ip_as_person.get()
         s.skip_nonresidential = self.skip_nonres.get()
         s.restore_state = self.restore_var.get()
+        s.theme = next((k for k, v in THEME_LABELS.items() if v == self.theme_var.get()), "system")
         s.sort_col = None if self.sort_var.get() in ("", SORT_DEBT_LABEL) else self.sort_var.get()
         s.sort_desc = self.sort_dir_var.get() != ASC_LABEL
         try:
@@ -1208,6 +1279,12 @@ class App(tk.Tk):
         self.render_page()
         self.save_settings_now()
 
+    def change_theme(self):
+        """Тема выбрана в настройках: применяется сразу и запоминается."""
+        self.settings.theme = self.collect_settings().theme
+        apply_theme(self, self.settings.theme)
+        self.save_settings_now()
+
     def save_settings_now(self):
         try:
             save_settings(self.collect_settings())
@@ -1225,7 +1302,7 @@ class App(tk.Tk):
         for pos in range(start, min(start + size, len(self.order))):
             idx = self.order[pos]
             vals = ([("☑" if self.check_state[idx] else "☐"), idx + 1, "✓" if self.card_flags[idx] else ""] if self.has_checks else []) + self.data_rows[idx]
-            self.item_index[self.tree.insert("", "end", values=vals)] = idx
+            self.item_index[self.tree.insert("", "end", values=vals, tags=("odd",) if pos % 2 else ())] = idx
         total, tp = len(self.order), self.total_pages()
         self.page_lbl.config(text=f"Стр. {self.page + 1} из {tp}")
         self.rows_lbl.config(text=f"строки {start + 1 if total else 0}–{min(start + size, total)} из {total}")
@@ -1346,6 +1423,16 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(rules, text="Сортировка применяется до отбора: в список попадают первые N должников в этом порядке.",
                   style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
         ttk.Button(rules, text="Признаки организаций…", command=app.edit_markers).pack(anchor="w", pady=(8, 0))
+
+        look = ttk.LabelFrame(body, text="Внешний вид", padding=8)
+        look.pack(fill="x", pady=(10, 0))
+        lrow = ttk.Frame(look)
+        lrow.pack(fill="x")
+        ttk.Label(lrow, text="Тема:").pack(side="left")
+        theme_cb = ttk.Combobox(lrow, textvariable=app.theme_var, values=list(THEME_LABELS.values()),
+                                state="readonly", width=18)
+        theme_cb.pack(side="left", padx=8)
+        theme_cb.bind("<<ComboboxSelected>>", lambda e: app.change_theme())
 
         orgs = ttk.LabelFrame(body, text="Организации", padding=8)
         orgs.pack(fill="x", pady=(10, 0))

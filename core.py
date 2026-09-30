@@ -46,6 +46,7 @@ class Settings:
     sort_col: str | None = None         # по какой колонке сортировать перед отбором N; None = по сумме долга
     sort_desc: bool = True              # True — по убыванию (от большего к меньшему)
     page_size: int = 50                 # строк таблицы на одной странице
+    theme: str = "system"               # оформление: system — как в системе, light — светлое, dark — тёмное
     org_markers: list[str] = field(default_factory=lambda: list(DEFAULT_ORG_MARKERS))
     markers_version: int = MARKERS_VERSION   # для дозаписи новых слов в сохранённый список
 
