@@ -370,9 +370,7 @@ class App(tk.Tk):
         self.all_cb.pack(side="left")
         self.pick_lbl = ttk.Label(pick_bar, text="", foreground="gray")
         self.pick_lbl.pack(side="left", padx=12)
-        self.nocard_lbl = ttk.Label(pick_bar, text="", foreground="gray")
-        self.nocard_lbl.pack(side="left")
-        self.bind("<FocusIn>", lambda e: e.widget is self and self.item_index and self.mark_missing_cards())
+        self.bind("<FocusIn>", lambda e: e.widget is self and self.item_index and self.refresh_card_flags())
 
         # пагинация — отдельная строка под таблицей: в одной строке с отметками она не помещалась в окно
         pager_bar = ttk.Frame(self)
@@ -472,7 +470,7 @@ class App(tk.Tk):
         self.refresh_pick_state()
 
     def copy_rows(self):
-        rows = ["\t".join(str(v) for v in self.tree.item(i, "values")[1 if self.has_checks else 0:])
+        rows = ["\t".join(str(v) for v in self.tree.item(i, "values")[3 if self.has_checks else 0:])
                 for i in self.tree.selection()]
         if rows:
             self.clipboard_clear()
@@ -1127,23 +1125,24 @@ class App(tk.Tk):
 
     def show_rows(self, headers, rows, numbered=False):
         """Загружает данные в таблицу и показывает первую страницу. numbered — режим результата (✓, №, отметки)."""
-        self.cols = (["✓", "№"] if numbered else []) + list(headers)
+        self.cols = (["✓", "№", "Данные"] if numbered else []) + list(headers)
         self.has_checks = numbered
         self.data_rows = [["" if v is None else v for v in r] for r in rows]
         self.check_state = [True] * len(rows) if numbered else []
         self.order = list(range(len(rows)))
         self.view_sort = None
         self.page = 0
+        self.compute_card_flags()
         self.col_titles = {f"c{i}": h for i, h in enumerate(self.cols)}
         self.tree["columns"] = [f"c{i}" for i in range(len(self.cols))]
         for i, h in enumerate(self.cols):
             self.tree.heading(f"c{i}", text=h, command=lambda c=f"c{i}": self.sort_view(c))
-            small = numbered and h in ("✓", "№")
-            self.tree.column(f"c{i}", width=(36 if h == "✓" else 46) if small else col_width(h),
+            small = numbered and h in SERVICE_COLS
+            self.tree.column(f"c{i}", width=SERVICE_COLS[h] if small else col_width(h),
                              minwidth=36 if small else 50, stretch=False, anchor="center" if small else "w")
-        self.col_weights = {f"c{i}": (36 if h == "✓" else 46) if (numbered and h in ("✓", "№")) else col_width(h)
+        self.col_weights = {f"c{i}": SERVICE_COLS[h] if (numbered and h in SERVICE_COLS) else col_width(h)
                             for i, h in enumerate(self.cols)}
-        self.fixed_cols = {f"c{i}" for i, h in enumerate(self.cols) if numbered and h in ("✓", "№")}
+        self.fixed_cols = {f"c{i}" for i, h in enumerate(self.cols) if numbered and h in SERVICE_COLS}
         self.all_cb.config(state="normal" if numbered and rows else "disabled")
         self.fit_columns()
         self.render_page()
@@ -1199,9 +1198,8 @@ class App(tk.Tk):
         self.item_index = {}
         for pos in range(start, min(start + size, len(self.order))):
             idx = self.order[pos]
-            vals = ([("☑" if self.check_state[idx] else "☐"), idx + 1] if self.has_checks else []) + self.data_rows[idx]
+            vals = ([("☑" if self.check_state[idx] else "☐"), idx + 1, "✓" if self.card_flags[idx] else ""] if self.has_checks else []) + self.data_rows[idx]
             self.item_index[self.tree.insert("", "end", values=vals)] = idx
-        self.mark_missing_cards()
         total, tp = len(self.order), self.total_pages()
         self.page_lbl.config(text=f"Стр. {self.page + 1} из {tp}")
         self.rows_lbl.config(text=f"строки {start + 1 if total else 0}–{min(start + size, total)} из {total}")
@@ -1212,21 +1210,29 @@ class App(tk.Tk):
             b.state([fwd])
         self.refresh_pick_state()
 
-    def mark_missing_cards(self):
-        """Строки, для которых ещё нет карточки собственника, подсвечиваются — сразу видно, что заполнить."""
-        self.tree.tag_configure("nocard", background="#fff4cc", foreground="#000000")
-        cards = owners._load_all() if (self.has_checks and self.result and self.result.top
-                                       and self.settings.addr_col and self.settings.flat_col) else None
-        missing = 0
-        for item, idx in self.item_index.items():
-            if cards is None or idx >= len(self.result.top):
-                self.tree.item(item, tags=())
-                continue
+    def compute_card_flags(self):
+        """Для каждой строки результата: есть ли карточка с персональными данными собственника."""
+        n = len(self.data_rows) if self.has_checks else 0
+        self.card_flags = [False] * n
+        if not (n and self.result and self.result.top and self.settings.addr_col and self.settings.flat_col):
+            return
+        cards = owners._load_all()
+        for idx in range(min(n, len(self.result.top))):
             info = self.row_info(idx)
-            has = owners.make_key(info["address"], info["flat"]) in cards
-            self.tree.item(item, tags=() if has else ("nocard",))
-            missing += 0 if has else 1
-        self.nocard_lbl.config(text=f"· без карточки собственника (жёлтые): {missing}" if missing else "")
+            d = cards.get(owners.make_key(info["address"], info["flat"]))
+            if d:
+                self.card_flags[idx] = any(getattr(o, k).strip() for o in owners._from_dict(d).owners
+                                           for k in owners.OWNER_FIELDS)
+
+    def refresh_card_flags(self):
+        """Карточки могли измениться в диалоге — обновляем колонку «Данные» на видимой странице."""
+        if not self.has_checks:
+            return
+        self.compute_card_flags()
+        for item, idx in self.item_index.items():
+            vals = list(self.tree.item(item, "values"))
+            vals[2] = "✓" if self.card_flags[idx] else ""
+            self.tree.item(item, values=vals)
 
     def sort_view(self, colid: str):
         """Сортировка таблицы кликом по заголовку — по всему списку, а не только по видимой странице.
@@ -1235,11 +1241,13 @@ class App(tk.Tk):
         if not self.order:
             return
         ci = int(colid[1:])
-        j = ci - (2 if self.has_checks else 0)                    # позиция в data_rows
+        j = ci - (3 if self.has_checks else 0)                    # позиция в data_rows
         if self.has_checks and ci == 0:
             getter = lambda idx: 1 if self.check_state[idx] else 0
         elif self.has_checks and ci == 1:
             getter = lambda idx: idx + 1
+        elif self.has_checks and ci == 2:
+            getter = lambda idx: 1 if self.card_flags[idx] else 0
         else:
             getter = lambda idx: self.data_rows[idx][j]
         desc = bool(self.view_sort and self.view_sort[0] == colid and not self.view_sort[1])
@@ -1254,6 +1262,8 @@ class App(tk.Tk):
         for cid, title in self.col_titles.items():
             self.tree.heading(cid, text=title + (("  ▼" if desc else "  ▲") if cid == colid else ""))
 
+
+SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64}      # служебные колонки таблицы результата и их ширина
 
 COLUMN_FIELDS = {
     "name_col": "ФИО *",
