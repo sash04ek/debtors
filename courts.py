@@ -1,5 +1,5 @@
 """Список судебных участков мировых судей: загружается с sudrf.ru (публичные данные ГАС «Правосудие»),
-хранится в ~/.debtors_courts.json; из него в заявлении выбирается нужный участок."""
+хранится в ~/.debtors/courts.json; из него в заявлении выбирается нужный участок."""
 
 from __future__ import annotations
 
@@ -11,7 +11,9 @@ from dataclasses import asdict, dataclass, fields
 from datetime import date
 from pathlib import Path
 
-COURTS_PATH = Path.home() / ".debtors_courts.json"
+import storage
+
+COURTS_PATH = storage.COURTS_PATH
 # Тот же адрес использует карта на странице «Участки мировых судей» sudrf.ru: код, название, адрес и координаты участков
 LIST_URL = "https://sudrf.ru/index.php?id=300&act=ya_coords&type_suds=mir"
 DEFAULT_REGIONS = "61"          # Ростовская область

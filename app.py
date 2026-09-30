@@ -15,10 +15,11 @@ import court
 import courts as courtsmod
 import orgs as orgmod
 import owners
+import storage
 from datetime import date
 
-CONFIG_PATH = Path.home() / ".debtors_finder.json"
-STATE_PATH = Path.home() / ".debtors_state.json"     # состояние приложения между запусками
+CONFIG_PATH = storage.SETTINGS_PATH
+STATE_PATH = storage.STATE_PATH                    # состояние приложения между запусками
 NONE = "— нет —"
 SORT_DEBT_LABEL = "Сумма долга"
 DESC_LABEL = "по убыванию (от большего к меньшему)"
