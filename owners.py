@@ -152,6 +152,8 @@ _LOWER_PARTS = {"оглы", "кызы", "улы", "кизи", "гызы"}
 def normalize_fio(fio: str) -> str:
     """«КЛАДЧЕНКО ВЕРА ИВАНОВНА» → «Кладченко Вера Ивановна»; инициалы («Л. И.») не трогает."""
     def fix(word: str) -> str:
+        if re.fullmatch(r"(?:[А-Яа-яЁёA-Za-z]\.)+", word):
+            return word.upper()                               # инициалы «В.Н.» остаются заглавными
         if len(word.rstrip(".")) <= 1:
             return word.upper()
         low = word.lower()

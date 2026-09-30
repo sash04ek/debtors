@@ -525,15 +525,26 @@ class App(tk.Tk):
         if org:
             self.org_cb.set(org.name)
             self.org_hint.config(text="определена по заголовку файла")
+        elif (uk := self._org_from_uk_column()):
+            self.org_cb.set(uk.name)
+            self.org_hint.config(text="определена по колонке «УК»")
         else:
-            self.org_hint.config(text="не удалось определить по файлу — выберите вручную")
+            cover = self.org_coverage()
+            if cover and cover[0][1] > 0:                              # заголовка нет — смотрим, чьи это дома
+                self.org_cb.set(cover[0][0].name)
+                self.org_hint.config(text="определена по домам из списка организации")
+            else:
+                self.org_hint.config(text="не удалось определить по файлу — выберите вручную")
         self.save_state()
 
     # ---------- состояние между запусками ----------
     def _state_key(self, k: int) -> str:
         """Ключ строки списка (ФИО, адрес, квартира) — устойчив к изменению порядка строк в файле."""
         s, h, row = self.settings, self.result.headers, self.result.top[k]
-        parts = [str(row[h.index(c)] or "") for c in (s.name_col, s.addr_col, s.flat_col) if c and c in h]
+        idx = {c: i for i, c in enumerate(h)}
+        parts = [str(row[idx[s.name_col]] or "") if s.name_col in idx else "",
+                 core.row_address(row, idx, s.addr_col, s.house_col),
+                 str(row[idx[s.flat_col]] or "") if s.flat_col in idx else ""]
         return "|".join(parts).lower()
 
     def save_state(self):
@@ -591,6 +602,60 @@ class App(tk.Tk):
         self.save_state()
         self.destroy()
 
+    def _org_from_uk_column(self):
+        """Организация по значению колонки «УК» / «Управляющая компания» (в отчётах без заголовка)."""
+        if not self.sheet:
+            return None
+        h = self.sheet.headers
+        col = next((c for c in h if c.strip().lower() in ("ук", "управляющая компания", "управляющая организация")), None)
+        if col is None:
+            return None
+        i = h.index(col)
+        value = next((str(r[i]) for r in self.sheet.rows if r[i] not in (None, "")), "")
+        return orgmod.find_by_title(self.orgs, value)
+
+    def org_coverage(self) -> list[tuple]:
+        """[(организация, число строк отчёта по её домам)] по убыванию; только организации со списком домов."""
+        addr_col = self.col_vars["addr_col"].get()
+        if not self.sheet or addr_col not in self.sheet.headers:
+            return []
+        idx = {c: i for i, c in enumerate(self.sheet.headers)}
+        house_col = self.col_vars["house_col"].get()
+        house_col = None if house_col in ("", NONE) else house_col
+        keys = [orgmod.norm_addr(a) for a in (core.row_address(r, idx, addr_col, house_col) for r in self.sheet.rows) if a]
+        out = []
+        for o in self.orgs:
+            if o.houses:
+                houses = orgmod.house_addresses(o)
+                out.append((o, sum(1 for k in keys if k in houses)))
+        return sorted(out, key=lambda t: -t[1])
+
+    def explain_empty_result(self, s) -> None:
+        """Список получился пустым — объясняем почему и, если возможно, предлагаем выход."""
+        st, org = self.result.stats, self.current_org()
+        total = st.get("всего строк", 0)
+        if org.houses and st.get("дома других организаций", 0) >= total > 0:
+            best = next(((o, n) for o, n in self.org_coverage() if n > 0 and o.name != org.name), None)
+            msg = (f"В списке домов организации «{org.name}» нет ни одного дома из этого отчёта: все строки отчёта "
+                   f"({total}) относятся к другим домам. В списке организации домов: {len(org.houses)}.")
+            if best:
+                msg += (f"\n\nБольше всего совпадений у «{best[0].name}» ({best[1]} строк). "
+                        "Переключиться на неё и отфильтровать заново?")
+                if messagebox.askyesno("Пустой список", msg):
+                    self.org_cb.set(best[0].name)
+                    self.org_hint.config(text="выбрана по домам")
+                    self.result = None
+                    self.run()
+                return
+            msg += ("\n\nПроверьте выбранную организацию и её дома (Настройки → Организации → Дома; "
+                    "пустой список домов означает «все дома файла»).")
+            messagebox.showinfo("Пустой список", msg)
+            return
+        parts = [f"{k}: {st[k]}" for k in ("не физлица", "нежилые помещения", "без долга / сумма не распознана") if st.get(k)]
+        messagebox.showinfo("Пустой список", "Под условия отбора не подошла ни одна строка.\n\n"
+                            + (("Пропущено: " + "; ".join(parts) + ".\n\n") if parts else "")
+                            + "Проверьте колонки в настройках (ФИО, «Сумма долга», «Адрес дома», «Квартира») и галочки отбора.")
+
     # ---------- организации ----------
     def refresh_orgs(self, keep=None):
         self.orgs = orgmod.load_orgs()
@@ -625,13 +690,13 @@ class App(tk.Tk):
         folder = filedialog.askdirectory(title=f"Папка для претензий ({org.name})")
         if not folder:
             return
-        ai, fi, ni = h.index(s.addr_col), h.index(s.flat_col), h.index(s.name_col)
+        fi, ni = h.index(s.flat_col), h.index(s.name_col)
         today, made = date.today(), 0
         out = Path(folder)
         try:
             for k in pick:
                 row = self.result.top[k]
-                addr, flat = orgmod.addr_flat(row[ai], row[fi])
+                addr, flat = orgmod.addr_flat(self.row_addr(row), row[fi])
                 fn = f"{k + 1:02d} " + claim.file_name(row[ni], addr, flat)
                 claim.build_claim(org, address=addr, flat=flat, debt=self.result.amounts[k],
                                   on_date=today, path=out / fn)
@@ -726,14 +791,14 @@ class App(tk.Tk):
             messagebox.showinfo("Письмо в ЕИРЦ", "Не отмечено ни одного адреса.")
             return
         h = self.result.headers
-        ai, fi = h.index(s.addr_col), h.index(s.flat_col)
+        fi = h.index(s.flat_col)
         default = f"Письмо в ЕИРЦ {org.name}.docx".replace("«", "").replace("»", "").replace('"', "")
         p = filedialog.asksaveasfilename(defaultextension=".docx", initialfile=default,
                                          filetypes=[("Word", "*.docx")])
         if not p:
             return
         try:
-            n = claim.build_letter(org, items=[orgmod.addr_flat(self.result.top[k][ai], self.result.top[k][fi])
+            n = claim.build_letter(org, items=[orgmod.addr_flat(self.row_addr(self.result.top[k]), self.result.top[k][fi])
                                                for k in pick],
                                    on_date=date.today(), path=p)
         except Exception as e:
@@ -742,10 +807,15 @@ class App(tk.Tk):
         messagebox.showinfo("Готово", f"Адресов в письме: {n}\nОрганизация: {org.name}\n{p}")
 
     # ---------- собственники и судебный приказ ----------
+    def row_addr(self, row: list) -> str:
+        """Адрес дома строки результата (с учётом отдельной колонки «Номер дома»)."""
+        s = self.settings
+        return core.row_address(row, {c: i for i, c in enumerate(self.result.headers)}, s.addr_col, s.house_col)
+
     def row_info(self, k: int) -> dict:
         """Данные строки топа: адрес, квартира, ФИО из отчёта, долг."""
         s, h, row = self.settings, self.result.headers, self.result.top[k]
-        addr, flat = orgmod.addr_flat(row[h.index(s.addr_col)] if s.addr_col else "",
+        addr, flat = orgmod.addr_flat(self.row_addr(row) if s.addr_col else "",
                                       row[h.index(s.flat_col)] if s.flat_col else "")
         return {
             "address": addr,
@@ -928,6 +998,11 @@ class App(tk.Tk):
             return False
         save_settings(s)
         self._display_result(s.sort_col or s.debt_col, s.sort_desc)
+        if not self.result.top and not quiet:
+            self.filter_btn.config(text="Сбросить фильтр")
+            self.save_state()
+            self.explain_empty_result(s)
+            return True
 
         st = self.result.stats
         self.stats_lbl.config(text=(
@@ -1098,10 +1173,11 @@ class App(tk.Tk):
 COLUMN_FIELDS = {
     "name_col": "ФИО *",
     "debt_col": "Сумма долга *",
-    "addr_col": "Адрес дома",
+    "addr_col": "Адрес дома (или улица)",
+    "house_col": "Номер дома (если в отдельной колонке)",
     "flat_col": "Квартира",
 }
-OPTIONAL_COLUMNS = ("addr_col", "flat_col")
+OPTIONAL_COLUMNS = ("addr_col", "house_col", "flat_col")
 
 
 class SettingsDialog(tk.Toplevel):
@@ -2004,14 +2080,16 @@ class HousesEditor(ttk.Frame):
         if addr_col not in a.sheet.headers:
             messagebox.showinfo("Дома", "В настройках выберите колонку «Адрес дома».", parent=self.winfo_toplevel())
             return
-        ai = a.sheet.headers.index(addr_col)
+        idx = {c: i for i, c in enumerate(a.sheet.headers)}
+        house_col = a.col_vars["house_col"].get()
+        house_col = None if house_col in ("", NONE) else house_col
         ni = a.sheet.headers.index(name_col) if name_col in a.sheet.headers else None
         have = {orgmod.norm_addr(h["address"]) for h in self.get()}
         added = 0
         for r in a.sheet.rows:
             if ni is not None and not r[ni]:
                 continue                                       # строки «Итог» без ФИО
-            addr = orgmod.clean_house_address(r[ai])          # без квартиры, скобок и лишней пунктуации
+            addr = orgmod.clean_house_address(core.row_address(r, idx, addr_col, house_col))   # без квартиры, скобок и пунктуации
             if addr and orgmod.norm_addr(addr) not in have:
                 have.add(orgmod.norm_addr(addr))
                 self._insert(addr, "", "")
@@ -2044,7 +2122,9 @@ class OrgDialog(tk.Toplevel):
         f = ttk.Frame(nb)
         g = ttk.Frame(nb)
         hs = ttk.Frame(nb, padding=(0, 0, 0, 4))
+        hd = ttk.Frame(nb)
         nb.add(hs, text="Дома")
+        nb.add(hd, text="Шапка")
         nb.add(f, text="Претензия")
         nb.add(g, text="Письмо в ЕИРЦ")
         h = ttk.Frame(nb)
@@ -2067,13 +2147,23 @@ class OrgDialog(tk.Toplevel):
             t = tk.Text(f, height=h, wrap="word")
             t.pack(fill="both", expand=True, pady=(0, 4))
             return t
-        self.header = text("Шапка (реквизиты организации), по строке на строку", 6)
         self.houses = HousesEditor(hs, parent)
         self.houses.pack(fill="both", expand=True)
         self.body = text("Текст претензии (пусто = стандартный). Поля: {org} {agent} {agent_address} {date} {debt} {days}; **жирный**", 8)
 
         b = ttk.Frame(f); b.pack(fill="x")
         ttk.Button(b, text="Стандартный текст", command=self.std_text).pack(side="right", padx=6)
+
+        # --- вкладка «Шапка»: реквизиты организации в верхней части документов ---
+        def htext(label, hint, height):
+            ttk.Label(hd, text=label, font=("", 12, "bold")).pack(anchor="w", pady=(6, 0))
+            ttk.Label(hd, text=hint, foreground="gray", wraplength=720, justify="left").pack(anchor="w")
+            t = tk.Text(hd, height=height, wrap="word")
+            t.pack(fill="both", expand=True, pady=(4, 8))
+            return t
+        self.header = htext("Шапка претензии", "Реквизиты организации по строке на строку (отображаются по центру).", 9)
+        self.l_header = htext("Шапка письма в ЕИРЦ и заявления о судебном приказе",
+                              "Строка с «# » в начале — крупным шрифтом (название организации); все строки жирным.", 9)
 
         # --- вкладка «Письмо в ЕИРЦ» ---
         def lrow(label, var):
@@ -2085,7 +2175,6 @@ class OrgDialog(tk.Toplevel):
             t = tk.Text(g, height=h, wrap="word")
             t.pack(fill="both", expand=True, pady=(0, 4))
             return t
-        self.l_header = ltext("Шапка письма (реквизиты). Строка с «# » в начале — крупным шрифтом; всё жирным", 8)
         self.l_to = ltext("Кому (справа). **жирный**", 4)
         self.l_body = ltext("Текст письма (пусто = стандартный). Поле {date} — срок ответа", 4)
         self.sign_role = tk.StringVar(); self.sign_name = tk.StringVar()
@@ -2108,7 +2197,7 @@ class OrgDialog(tk.Toplevel):
         ):
             ttk.Label(h, text=label).pack(anchor="w")
             ttk.Entry(h, textvariable=self.c_vars[key]).pack(fill="x", pady=(0, 4))
-        ttk.Label(h, text="Шапка заявления берётся со вкладки «Письмо в ЕИРЦ»; подписант — оттуда же. Судебный участок закрепляется за домом на вкладке «Дома» или выбирается в карточке помещения и при формировании заявлений.",
+        ttk.Label(h, text="Шапка заявления берётся со вкладки «Шапка»; подписант — со вкладки «Письмо в ЕИРЦ». Судебный участок закрепляется за домом на вкладке «Дома» или выбирается в карточке помещения и при формировании заявлений.",
                   wraplength=760, justify="left",
                   foreground="gray").pack(anchor="w", pady=(8, 0))
 
