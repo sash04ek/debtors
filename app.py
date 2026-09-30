@@ -410,10 +410,70 @@ class App(tk.Tk):
         self.tree.bind("<Button-1>", self.on_tree_click)
         self.tree.bind("<space>", self.on_tree_space)
         self.tree.bind("<Double-Button-1>", self.on_tree_double)
+        self._build_context_menu()
+        self._bind_shortcuts()
         ys.grid(row=0, column=1, sticky="ns")
         xs.grid(row=1, column=0, sticky="we")
         table.rowconfigure(0, weight=1)
         table.columnconfigure(0, weight=1)
+
+    # ---------- горячие клавиши и контекстное меню ----------
+    def _bind_shortcuts(self):
+        mod = "Command" if self.tk.call("tk", "windowingsystem") == "aqua" else "Control"
+
+        def guarded(fn):
+            def handler(event=None):
+                # в полях ввода клавиши работают как обычно
+                if isinstance(getattr(event, "widget", None), (tk.Entry, ttk.Entry, tk.Text, ttk.Combobox)):
+                    return None
+                fn()
+                return "break"
+            return handler
+
+        self.bind_all(f"<{mod}-o>", lambda e: (self.open_file(), "break")[1])
+        self.bind_all(f"<{mod}-comma>", lambda e: (self.open_settings(), "break")[1])
+        self.bind_all(f"<{mod}-a>", guarded(self._select_all_rows), add="+")
+        self.bind_all("<F5>", lambda e: (self.on_filter_button(), "break")[1])
+        self.bind_all(f"<{mod}-Return>", lambda e: (self.on_filter_button(), "break")[1])
+        self.tree.bind(f"<{mod}-c>", lambda e: (self.copy_rows(), "break")[1])
+        Tooltip(self.filter_btn, f"Применить или сбросить фильтр (F5, {'⌘' if mod == 'Command' else 'Ctrl+'}Enter)")
+
+    def _select_all_rows(self):
+        if self.focus_get() is self.tree:
+            self.tree.selection_set(self.tree.get_children())
+
+    def _build_context_menu(self):
+        self.ctx = tk.Menu(self, tearoff=0)
+        self.ctx.add_command(label="Собственники помещения…", command=self.edit_owner)
+        self.ctx.add_command(label="Отметить / снять отметку", command=self._toggle_selected)
+        self.ctx.add_separator()
+        self.ctx.add_command(label="Копировать строки", command=self.copy_rows)
+        for seq in ("<Button-3>", "<Button-2>", "<Control-Button-1>"):
+            self.tree.bind(seq, self.show_context_menu, add="+")
+
+    def show_context_menu(self, event):
+        item = self.tree.identify_row(event.y)
+        if not item:
+            return
+        if item not in self.tree.selection():
+            self.tree.selection_set(item)
+        owner_ok = bool(self.result and self.result.top and self.has_checks)
+        self.ctx.entryconfig(0, state="normal" if owner_ok else "disabled")
+        self.ctx.entryconfig(1, state="normal" if self.has_checks else "disabled")
+        self.ctx.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    def _toggle_selected(self):
+        for item in self.tree.selection():
+            self._toggle_item(item)
+        self.refresh_pick_state()
+
+    def copy_rows(self):
+        rows = ["\t".join(str(v) for v in self.tree.item(i, "values")[1 if self.has_checks else 0:])
+                for i in self.tree.selection()]
+        if rows:
+            self.clipboard_clear()
+            self.clipboard_append("\n".join(rows))
 
     # ---------- действия ----------
     def open_file(self):
@@ -723,7 +783,12 @@ class App(tk.Tk):
     def refresh_pick_state(self):
         n, total = sum(self.check_state), len(self.check_state)
         self.all_var.set(total > 0 and n == total)
-        self.pick_lbl.config(text=f"Отмечено адресов: {n} из {total}" if self.has_checks else "")
+        text = ""
+        if self.has_checks:
+            text = f"Отмечено адресов: {n} из {total}"
+            if self.result and len(self.result.amounts) == total:
+                text += f" · долг отмеченных: {fmt_money(sum(a for a, on in zip(self.result.amounts, self.check_state) if on))}"
+        self.pick_lbl.config(text=text)
         self.save_state()
 
     def toggle_all(self):
