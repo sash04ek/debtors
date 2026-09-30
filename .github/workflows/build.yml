@@ -7,8 +7,8 @@ jobs:
         os: [windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt pyinstaller
       - if: runner.os == 'Windows'
@@ -17,7 +17,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --collect-data petrovich --windowed --icon assets/icon.icns --add-data "assets/icon.png:assets" --add-data "assets/gear.png:assets" --add-data "assets/gear_hover.png:assets" --name Debtors app.py
           cd dist && zip -qr Debtors-mac.zip Debtors.app
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: Debtors-${{ runner.os }}
           path: |
