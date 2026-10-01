@@ -519,8 +519,6 @@ class App(tk.Tk):
         ttk.Label(docs, text="Документы для отмеченных:").pack(side="left", padx=(0, 6))
         self.docs_btn = ttk.Button(docs, text="Создать документы ▾", command=self.show_docs_menu, state="disabled")
         self.docs_btn.pack(side="left")
-        self.owner_btn = ttk.Button(docs, text="Собственники помещения…", command=self.edit_owner, state="disabled")
-        self.owner_btn.pack(side="right")
 
         # строка состояния внизу окна, как в Finder: тонкая линия сверху и мелкий приглушённый текст по центру
         status = ttk.Frame(self)
@@ -883,7 +881,6 @@ class App(tk.Tk):
         self.result = None
         self.export_btn.config(state="disabled")
         self.docs_btn.config(state="disabled")
-        self.owner_btn.config(state="disabled")
         org = orgmod.find_by_title(self.orgs, self.sheet.title)
         if org:
             self.org_cb.set(org.name)
@@ -1391,7 +1388,7 @@ class App(tk.Tk):
         self.result = None
         self.show_rows(self.sheet.headers, self.sheet.rows)
         self.stats_lbl.config(text=f"Загружено строк: {len(self.sheet.rows)}")
-        for b in (self.export_btn, self.docs_btn, self.owner_btn):
+        for b in (self.export_btn, self.docs_btn):
             b.config(state="disabled")
         self.filter_btn.config(text="Фильтровать")
         self.save_state()
@@ -1549,7 +1546,7 @@ class App(tk.Tk):
         else:
             self._mark_sort("c1", False)
         state = "normal" if self.result.top else "disabled"
-        for b in (self.export_btn, self.docs_btn, self.owner_btn):
+        for b in (self.export_btn, self.docs_btn):
             b.config(state=state)
 
     def export(self):
