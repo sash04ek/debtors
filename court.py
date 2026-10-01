@@ -91,7 +91,7 @@ def _owner_label(o: Owner) -> str:
 
 
 def build_court_application(org: Organization, card: Card, case: Case, *, path: str | Path,
-                            court_obj: "courtsmod.Court | None" = None) -> bool:
+                            court_obj: "courtsmod.Court | None" = None, duty: float | None = None) -> bool:
     """Формирует заявление на одного собственника. Возвращает True, если использован шаблон «собственник известен»."""
     owner = case.owner
     known = owner is not None
@@ -102,7 +102,7 @@ def build_court_application(org: Organization, card: Card, case: Case, *, path: 
     # выбранный участок или пустое место, которое заполняют вручную
     court = courtsmod.header_text(court_obj) if court_obj else COURT_PLACEHOLDER
     debt_a, pen_a = case.debt, case.penalty
-    duty_a = _amount(card.duty, _amount(org.duty_default))
+    duty_a = _amount(card.duty, duty if duty is not None else _amount(org.duty_default))      # карточка > расчёт по НК РФ > значение организации
     fio_gen = (owner.fio_gen.strip() or owners.decline_fio(fio, "gen")) if known else ""
     fio_ins = (owner.fio_ins.strip() or owners.decline_fio(fio, "ins")) if known else ""
     several = len(case.co_owners) > 1

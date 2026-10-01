@@ -16,6 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 import claim
 import core
 import court
+import duty
 import courts as courtsmod
 import orgs as orgmod
 import owners
@@ -498,6 +499,7 @@ class App(tk.Tk):
         self.ip_as_person = tk.BooleanVar(value=self.settings.ip_as_person)
         self.skip_nonres = tk.BooleanVar(value=self.settings.skip_nonresidential)
         self.only_managed = tk.BooleanVar(value=self.settings.only_managed)
+        self.duty_auto = tk.BooleanVar(value=self.settings.duty_auto)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
         self.font_var = tk.StringVar(value=FONT_LABELS.get(self.settings.table_font, FONT_LABELS["normal"]))
         self.theme_var = tk.StringVar(value=THEME_LABELS.get(self.settings.theme, THEME_LABELS["system"]))
@@ -1276,7 +1278,7 @@ class App(tk.Tk):
             messagebox.showinfo("Судебные участки", "Список участков не загружен: в заявлениях поле суда останется пустым. "
                                 "Загрузить список можно в настройках (шестерёнка → «Судебные участки»).")
         total = sum(len(j["cases"]) for j in jobs)
-        n_known = n_unknown = no_card = no_court = multi = done = 0
+        n_known = n_unknown = no_card = no_court = multi = done = n_duty = 0
         prog = self.start_progress("Заявления о судебном приказе", total)
         try:
             for job in jobs:
@@ -1297,7 +1299,12 @@ class App(tk.Tk):
                     fn = f"{num} " + claim.safe_name(
                         f"Заявление о судебном приказе {who} {info['address']} кв {claim.clean_flat(info['flat'])}") + ".docx"
                     no_court += 0 if court_obj else 1
-                    if court.build_court_application(org, card, case, path=out / fn, court_obj=court_obj):
+                    duty_val = None
+                    if self.settings.duty_auto and case.debt is not None and not (card.duty or "").strip():
+                        duty_val = duty.court_order_duty(case.debt + (case.penalty or 0), self.settings.duty_scale or None,
+                                                         self.settings.duty_share)
+                        n_duty += 1
+                    if court.build_court_application(org, card, case, path=out / fn, court_obj=court_obj, duty=duty_val):
                         n_known += 1
                     else:
                         n_unknown += 1
@@ -1316,6 +1323,9 @@ class App(tk.Tk):
                      "отдельное заявление (номера вида 05-1, 05-2).")
         if no_court:
             note += f"\n\nБез судебного участка (поле суда пустое): {no_court}."
+        if n_duty:
+            note += (f"\n\nГоспошлина рассчитана по ст. 333.19 НК РФ (50 % от пошлины по иску) в заявлениях: {n_duty}. "
+                     "Проверьте ставки в Настройки → Госпошлина → «Таблица ставок…».")
         if prog.cancelled:
             note += "\n\nСоздание прервано пользователем."
         self.finish_docs("Готово", f"Заявлений: {n_known + n_unknown}\n"
@@ -1487,6 +1497,7 @@ class App(tk.Tk):
         s.ip_as_person = self.ip_as_person.get()
         s.skip_nonresidential = self.skip_nonres.get()
         s.only_managed = self.only_managed.get()
+        s.duty_auto = self.duty_auto.get()
         s.restore_state = self.restore_var.get()
         s.table_font = next((k for k, v in FONT_LABELS.items() if v == self.font_var.get()), "normal")
         s.theme = next((k for k, v in THEME_LABELS.items() if v == self.theme_var.get()), "system")
@@ -1863,6 +1874,10 @@ class SettingsDialog(Dialog):
         ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
         ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
+        dty = widgets.section(left, "Госпошлина")
+        widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
+        ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
+
         orgs = widgets.section(left, "Организации")
         ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
@@ -1894,6 +1909,9 @@ class SettingsDialog(Dialog):
     def destroy(self):
         self.app.settings_dialog = None
         super().destroy()
+
+    def edit_duty(self):
+        DutyScaleDialog(self)
 
     def export_data(self):
         if not messagebox.askokcancel("Экспорт данных", "В файл попадут персональные данные собственников. "
@@ -2347,6 +2365,142 @@ def open_folder(path: Path) -> None:
         pass
 
 
+def _num(text: str) -> float:
+    return float(str(text).replace(" ", "").replace("\u00a0", "").replace(",", "."))
+
+
+class DutyScaleDialog(Dialog):
+    """Таблица ставок госпошлины (ст. 333.19 НК РФ), доля для судебного приказа и проверка расчёта на примере."""
+
+    def __init__(self, parent: "SettingsDialog"):
+        super().__init__(parent)
+        self.app = parent.app
+        self.title("Госпошлина")
+        self.transient(parent)
+        if _is_mac(self.app):
+            set_window_appearance(self.app, self, self.app.settings.theme)
+        s = self.app.settings
+        self.scale = [dict(r) for r in (s.duty_scale or duty.DEFAULT_SCALE)]
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Иск имущественного характера: пошлина = базовая сумма + процент от суммы свыше порога. "
+                             "Последняя строка без границы цены.", wraplength=640, justify="left").pack(anchor="w")
+        box = ttk.Frame(body)
+        box.pack(fill="both", expand=True, pady=(8, 6))
+        self.tree = ttk.Treeview(box, columns=("up_to", "base", "rate", "over"), show="headings", height=10, selectmode="browse")
+        for c, text, w in (("up_to", "Цена иска до, руб.", 150), ("base", "Базовая сумма, руб.", 150),
+                           ("rate", "% с суммы свыше", 120), ("over", "Порог «свыше», руб.", 150)):
+            self.tree.heading(c, text=text)
+            self.tree.column(c, width=w, anchor="e")
+        self.tree.pack(side="left", fill="both", expand=True)
+        self.tree.bind("<<TreeviewSelect>>", lambda e: self.load_selected())
+        row = ttk.Frame(body)
+        row.pack(fill="x")
+        self.vars = [tk.StringVar() for _ in range(4)]
+        for v in self.vars:
+            ttk.Entry(row, textvariable=v, width=14).pack(side="left", padx=(0, 6))
+        ttk.Button(row, text="Добавить / обновить", command=self.upsert).pack(side="left")
+        ttk.Button(row, text="Удалить", command=self.remove).pack(side="left", padx=6)
+        srow = ttk.Frame(body)
+        srow.pack(fill="x", pady=(10, 0))
+        ttk.Label(srow, text="Судебный приказ, % от пошлины по иску:").pack(side="left")
+        self.share = tk.StringVar(value=f"{s.duty_share:g}")
+        ttk.Entry(srow, textvariable=self.share, width=7).pack(side="left", padx=6)
+        crow = ttk.Frame(body)
+        crow.pack(fill="x", pady=(10, 0))
+        ttk.Label(crow, text="Проверка. Цена требования, руб.:").pack(side="left")
+        self.price = tk.StringVar()
+        ttk.Entry(crow, textvariable=self.price, width=14).pack(side="left", padx=6)
+        self.price.trace_add("write", lambda *a: self.check())
+        self.check_lbl = ttk.Label(body, text="", style="Muted.TLabel", wraplength=640, justify="left")
+        self.check_lbl.pack(anchor="w", pady=(4, 0))
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(12, 0))
+        ttk.Button(btns, text="Сохранить", command=self.save).pack(side="right")
+        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        ttk.Button(btns, text="Сбросить к НК РФ", command=self.reset).pack(side="left")
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.refresh()
+        center_over(self, parent)
+
+    @staticmethod
+    def _fmt(v) -> str:
+        return "" if v in (None, "") else f"{float(v):,.2f}".replace(",", " ").replace(".00", "")
+
+    def refresh(self):
+        self.scale.sort(key=lambda r: (r.get("up_to") in (None, ""), float(r.get("up_to") or 0)))
+        self.tree.delete(*self.tree.get_children())
+        for r in self.scale:
+            up = self._fmt(r.get("up_to")) or "без границы"
+            self.tree.insert("", "end", values=(up, self._fmt(r["base"]), f"{float(r.get('rate') or 0):g}", self._fmt(r.get("over") or 0)))
+        self.check()
+
+    def load_selected(self):
+        sel = self.tree.selection()
+        if sel:
+            r = self.scale[self.tree.index(sel[0])]
+            for v, val in zip(self.vars, (r.get("up_to"), r["base"], r.get("rate") or 0, r.get("over") or 0)):
+                v.set("" if val in (None, "") else f"{float(val):g}")
+
+    def upsert(self):
+        try:
+            up = self.vars[0].get().strip()
+            row = {"up_to": _num(up) if up else None, "base": _num(self.vars[1].get()),
+                   "rate": _num(self.vars[2].get() or 0), "over": _num(self.vars[3].get() or 0)}
+        except ValueError:
+            messagebox.showinfo("Госпошлина", "Введите числа (разделитель — запятая или точка).", parent=self)
+            return
+        sel = self.tree.selection()
+        if sel:
+            self.scale[self.tree.index(sel[0])] = row
+        else:
+            self.scale.append(row)
+        self.refresh()
+
+    def remove(self):
+        sel = self.tree.selection()
+        if sel and len(self.scale) > 1:
+            del self.scale[self.tree.index(sel[0])]
+            self.refresh()
+
+    def reset(self):
+        self.scale = [dict(r) for r in duty.DEFAULT_SCALE]
+        self.share.set(f"{duty.DEFAULT_SHARE:g}")
+        self.refresh()
+
+    def _valid(self):
+        """Таблица пригодна для расчёта: есть строка без границы цены (и только последняя)."""
+        if not self.scale or self.scale[-1].get("up_to") not in (None, "") or any(
+                r.get("up_to") in (None, "") for r in self.scale[:-1]):
+            return False
+        return True
+
+    def check(self):
+        try:
+            price = _num(self.price.get())
+            share = _num(self.share.get() or duty.DEFAULT_SHARE)
+        except ValueError:
+            self.check_lbl.config(text="")
+            return
+        self.check_lbl.config(text=duty.explain(price, self.scale, share) if self._valid() else
+                              "В таблице нужна последняя строка без границы цены.")
+
+    def save(self):
+        try:
+            share = _num(self.share.get())
+        except ValueError:
+            messagebox.showinfo("Госпошлина", "Укажите процент для судебного приказа числом.", parent=self)
+            return
+        if not self._valid():
+            messagebox.showinfo("Госпошлина", "Последняя строка таблицы должна быть без границы цены (одна такая строка).", parent=self)
+            return
+        s = self.app.settings
+        s.duty_scale = [] if self.scale == duty.DEFAULT_SCALE else self.scale
+        s.duty_share = share
+        self.app.save_settings_now()
+        self.destroy()
+
+
 class WelcomeDialog(Dialog):
     """Приветствие при первом запуске: коротко о том, как работать с программой."""
 
@@ -2545,7 +2699,7 @@ class OwnerDialog(Dialog):
             ("debt_to", "Долг за период по"),
             ("pen_from", "Пеня за период с"),
             ("pen_to", "Пеня за период по"),
-            ("duty", "Госпошлина (пусто = по умолчанию организации)"),
+            ("duty", "Госпошлина, руб. (пусто = расчёт по НК РФ)"),
             ("payment_order", "Платёжное поручение (№ и дата)"),
             ("invoice_month", "Счёт-извещение за (напр. март 2023 года)"),
         ]),
@@ -3083,7 +3237,7 @@ class OrgDialog(Dialog):
             ("applicant_address", "Адрес заявителя в заявлении"),
             ("region", "Регион (в адресах помещений)"),
             ("city_in", "Город в предложном падеже («в г. Таганроге»)"),
-            ("duty_default", "Госпошлина по умолчанию, руб. (проверьте ставку по НК РФ)"),
+            ("duty_default", "Госпошлина, если расчёт выключен или нет суммы, руб."),
             ("license_text", "Уведомление о лицензии («№ 679 от 18.05.2021»)"),
             ("poa_text", "Доверенность от («23.08.2022г.»)"),
         ):

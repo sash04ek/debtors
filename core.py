@@ -55,6 +55,9 @@ class Settings:
     geometry: str = ""                  # размер и положение главного окна («980x700+120+60»)
     table_font: str = "normal"          # размер шрифта таблицы: normal / large / xlarge
     only_managed: bool = False          # в отбор попадают только дома, которые сейчас в управлении (по дате в списке домов)
+    duty_auto: bool = True              # госпошлину в заявлении считать по ст. 333.19 НК РФ (ручное значение в карточке главнее)
+    duty_scale: list = field(default_factory=list)      # таблица ставок; пусто — встроенная (duty.DEFAULT_SCALE)
+    duty_share: float = 50.0            # судебный приказ: % от пошлины по иску
     theme: str = "system"               # оформление: system — как в системе, light — светлое, dark — тёмное
     org_markers: list[str] = field(default_factory=lambda: list(DEFAULT_ORG_MARKERS))
     markers_version: int = MARKERS_VERSION   # для дозаписи новых слов в сохранённый список
