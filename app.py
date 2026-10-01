@@ -241,22 +241,65 @@ def center_on_screen(win: tk.Tk, width: int, height: int) -> None:
     win.geometry(f"{width}x{height}+{x}+{y}")
 
 
+class Dialog(tk.Toplevel):
+    """Дочернее окно, которое не показывается, пока не построено и не поставлено на место (center_over):
+    иначе оно на мгновение появляется в углу экрана и потом «переезжает».
+    На macOS скрытое окно с transient() показывается при первой же обработке событий, поэтому transient
+    откладывается до момента показа."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.withdraw()
+        self._transient_master = None
+        self.after(150, self._ensure_shown)                    # страховка, если окно не вызывает center_over (idle-обработчик сработал бы слишком рано)
+
+    def geometry(self, newGeometry=None):
+        """Запоминает заданный размер: у скрытого окна winfo_width() ещё 1, а center_over нужен настоящий размер."""
+        m = re.match(r"(\d+)x(\d+)", newGeometry or "")
+        if m:
+            self._req_size = (int(m.group(1)), int(m.group(2)))
+        return super().geometry(newGeometry) if newGeometry is not None else super().geometry()
+
+    def transient(self, master=None):
+        if master is None:
+            return super().transient()
+        self._transient_master = master
+
+    def show(self):
+        try:
+            if self.state() == "withdrawn":
+                if self._transient_master is not None:
+                    super().transient(self._transient_master)
+                self.deiconify()
+        except tk.TclError:
+            pass                                               # окно уже закрыли
+
+    def _ensure_shown(self):
+        self.show()
+
+
 def center_over(win: tk.Misc, parent: tk.Misc) -> None:
-    """Ставит дочернее окно по центру родительского (и не даёт уйти за край экрана)."""
+    """Ставит дочернее окно по центру родительского (и не даёт уйти за край экрана), затем показывает его."""
     win.update_idletasks()
     parent.update_idletasks()
-    w = max(win.winfo_width(), win.winfo_reqwidth())
-    h = max(win.winfo_height(), win.winfo_reqheight())
+    size = getattr(win, "_req_size", None)                     # размер, заданный окном явно
+    w = size[0] if size else max(win.winfo_width(), win.winfo_reqwidth())
+    h = size[1] if size else max(win.winfo_height(), win.winfo_reqheight())
     x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
     y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
     x = max(0, min(x, win.winfo_screenwidth() - w))
     y = max(0, min(y, win.winfo_screenheight() - h))
+    # geometry задаёт положение с рамкой окна: компенсируем высоту заголовка (её берём у уже показанного родителя)
+    dy = parent.winfo_toplevel().winfo_rooty() - parent.winfo_toplevel().winfo_y()
+    if 0 < dy < 100:
+        y = max(0, y - dy)
     win.geometry(f"{w}x{h}+{x}+{y}")
     win.update_idletasks()
-    # geometry задаёт положение с рамкой окна: компенсируем высоту заголовка
-    dy = win.winfo_rooty() - win.winfo_y()
-    if 0 < dy < 100:
-        win.geometry(f"{w}x{h}+{x}+{max(0, y - dy)}")
+    if isinstance(win, Dialog):
+        win.show()                                             # показываем уже на своём месте
+    elif win.state() == "withdrawn":
+        win.deiconify()
+    win.update_idletasks()
 
 
 def col_width(header: str) -> int:
@@ -1398,7 +1441,7 @@ class App(tk.Tk):
             return "break"
 
     def edit_markers(self):
-        win = tk.Toplevel(self)
+        win = Dialog(self)
         win.title("Признаки организаций")
         win.geometry("420x460")
         win.transient(self)
@@ -1754,7 +1797,7 @@ COLUMN_FIELDS = {
 OPTIONAL_COLUMNS = ("addr_col", "house_col", "flat_col")
 
 
-class SettingsDialog(tk.Toplevel):
+class SettingsDialog(Dialog):
     """Экран настроек: колонки файла, число должников, правила отбора."""
 
     def __init__(self, app: "App"):
@@ -2051,7 +2094,7 @@ class AutoCombo(ttk.Frame):
         self.on_pick(key)
 
 
-class CourtEditDialog(tk.Toplevel):
+class CourtEditDialog(Dialog):
     """Данные участка, которых нет в списке sudrf.ru: мировой судья и (при необходимости) исправленный адрес суда."""
 
     def __init__(self, parent, court, on_done):
@@ -2086,7 +2129,7 @@ class CourtEditDialog(tk.Toplevel):
         self.on_done()
 
 
-class CourtsEditorDialog(tk.Toplevel):
+class CourtsEditorDialog(Dialog):
     """Правка судьи и адреса суда у загруженных участков. Можно выделить несколько участков и задать им общий адрес."""
 
     def __init__(self, parent):
@@ -2288,7 +2331,7 @@ def open_folder(path: Path) -> None:
         pass
 
 
-class WelcomeDialog(tk.Toplevel):
+class WelcomeDialog(Dialog):
     """Приветствие при первом запуске: коротко о том, как работать с программой."""
 
     def __init__(self, app: "App"):
@@ -2334,7 +2377,7 @@ class NoProgress:
         pass
 
 
-class ProgressWindow(tk.Toplevel):
+class ProgressWindow(Dialog):
     """Индикатор выполнения при создании большого числа документов; можно прервать."""
 
     def __init__(self, app: "App", title: str, total: int):
@@ -2368,7 +2411,7 @@ class ProgressWindow(tk.Toplevel):
         self.destroy()
 
 
-class DocsDialog(tk.Toplevel):
+class DocsDialog(Dialog):
     """Подтверждение перед созданием документов: сколько будет создано, что не заполнено и в какую папку сохранить."""
 
     def __init__(self, app: "App", title: str, org_name: str, count: str, summary: str, rows: list[tuple], folder: Path):
@@ -2421,7 +2464,7 @@ class DocsDialog(tk.Toplevel):
         self.destroy()
 
 
-class CourtChoiceDialog(tk.Toplevel):
+class CourtChoiceDialog(Dialog):
     """Перед формированием заявлений: какой судебный участок подставить (для карточек без своего участка)."""
 
     def __init__(self, app: "App", courts: list, last: str, n: int, total: int | None = None):
@@ -2459,7 +2502,7 @@ class CourtChoiceDialog(tk.Toplevel):
         self.destroy()
 
 
-class OwnerDialog(tk.Toplevel):
+class OwnerDialog(Dialog):
     """Карточка помещения: собственники (у помещения их может быть несколько) и данные по делу.
     Заявление о судебном приказе формируется на каждого собственника."""
 
@@ -2931,7 +2974,7 @@ class HousesEditor(ttk.Frame):
                             parent=self.winfo_toplevel())
 
 
-class OrgDialog(tk.Toplevel):
+class OrgDialog(Dialog):
     """Редактор организаций: реквизиты, дома, текст претензии."""
 
     def __init__(self, parent, orgs, selected, on_close, focus_address: str = ""):
