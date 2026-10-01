@@ -20,6 +20,7 @@ import courts as courtsmod
 import orgs as orgmod
 import owners
 import storage
+import widgets
 from datetime import date
 
 CONFIG_PATH = storage.SETTINGS_PATH
@@ -1626,6 +1627,10 @@ class App(tk.Tk):
         self.settings.theme = self.collect_settings().theme
         apply_theme(self, self.settings.theme)
         self.save_settings_now()
+        dlg = getattr(self, "settings_dialog", None)
+        if dlg is not None:
+            self.update_idletasks()
+            widgets.retheme(dlg)                                  # карточки настроек перекрашиваются в новую тему
 
     def save_settings_now(self):
         try:
@@ -1746,99 +1751,77 @@ class SettingsDialog(tk.Toplevel):
         self.app = app
         self.title("Настройки")
         self.transient(app)
-        self.resizable(False, False)
 
-        body = ttk.Frame(self, padding=12)
-        body.pack(fill="both", expand=True)
+        # прокручиваемая форма из блоков-карточек в стиле системных настроек
+        outer = ttk.Frame(self)
+        outer.pack(fill="both", expand=True, padx=(16, 0), pady=(0, 0))
+        canvas = tk.Canvas(outer, highlightthickness=0, width=600)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        body = ttk.Frame(canvas)
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        win = canvas.create_window((0, 0), window=body, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        canvas._wheel_scrollable = True
+        pad_r = ttk.Frame(body)                               # отступ справа от полосы прокрутки
+        pad_r.pack(fill="both", expand=True, padx=(0, 14))
+        body = pad_r
 
-        cols = ttk.LabelFrame(body, text="Колонки файла", padding=8)
-        cols.pack(fill="x")
-        for row, (key, text) in enumerate(COLUMN_FIELDS.items()):
-            ttk.Label(cols, text=text).grid(row=row, column=0, sticky="w", pady=3)
-            ttk.Combobox(cols, state="readonly", width=34, textvariable=app.col_vars[key],
-                         values=app.col_options[key]).grid(row=row, column=1, sticky="we", padx=(10, 0), pady=3)
-        cols.columnconfigure(1, weight=1)
-        if not app.sheet:
-            ttk.Label(cols, text="Колонки появятся после открытия файла.", style="Muted.TLabel").grid(
-                row=len(COLUMN_FIELDS), column=0, columnspan=2, sticky="w", pady=(6, 0))
+        cols = widgets.section(body, "Колонки файла", pady=(8, 0))
+        for key, text in COLUMN_FIELDS.items():
+            widgets.PopupSelect(cols.row(text), app.col_vars[key], app.col_options[key] or [""]).pack()
 
-        rules = ttk.LabelFrame(body, text="Отбор", padding=8)
-        rules.pack(fill="x", pady=(10, 0))
-        line = ttk.Frame(rules)
-        line.pack(fill="x")
-        ttk.Label(line, text="Показать должников:").pack(side="left")
-        ttk.Spinbox(line, from_=1, to=100000, textvariable=app.top_n, width=7).pack(side="left", padx=8)
-        ttk.Checkbutton(rules, text="ИП считать физлицами", variable=app.ip_as_person).pack(anchor="w", pady=(6, 0))
-        ttk.Checkbutton(rules, text="Пропускать нежилые помещения (н/п, магазины и т. п.)",
-                        variable=app.skip_nonres).pack(anchor="w", pady=(2, 0))
-        ttk.Checkbutton(rules, text="Запоминать состояние при запуске (файл, список, отметки)",
-                        variable=app.restore_var).pack(anchor="w", pady=(2, 0))
-        srow = ttk.Frame(rules)
-        srow.pack(fill="x", pady=(8, 0))
-        ttk.Label(srow, text="Сортировать по:").pack(side="left")
-        ttk.Combobox(srow, textvariable=app.sort_var, values=app.sort_options, state="readonly", width=26).pack(
-            side="left", padx=(8, 6))
-        ttk.Combobox(srow, textvariable=app.sort_dir_var, values=[DESC_LABEL, ASC_LABEL], state="readonly",
-                     width=34).pack(side="left")
-        ttk.Label(rules, text="Сортировка применяется до отбора: в список попадают первые N должников в этом порядке.",
-                  style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
-        ttk.Button(rules, text="Признаки организаций…", command=app.edit_markers).pack(anchor="w", pady=(8, 0))
+        rules = widgets.section(body, "Отбор")
+        ttk.Spinbox(rules.row("Показать должников"), from_=1, to=100000, textvariable=app.top_n, width=7).pack()
+        widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
+        widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
+        widgets.Switch(rules.row("Запоминать состояние при запуске"), app.restore_var).pack()
+        widgets.PopupSelect(rules.row("Сортировать по"), app.sort_var, app.sort_options).pack()
+        widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()
+        ttk.Button(rules.row("Признаки организаций"), text="Изменить…", command=app.edit_markers).pack()
 
-        look = ttk.LabelFrame(body, text="Внешний вид", padding=8)
-        look.pack(fill="x", pady=(10, 0))
-        lrow = ttk.Frame(look)
-        lrow.pack(fill="x")
-        ttk.Label(lrow, text="Тема:").pack(side="left")
-        theme_cb = ttk.Combobox(lrow, textvariable=app.theme_var, values=list(THEME_LABELS.values()),
-                                state="readonly", width=18)
-        theme_cb.pack(side="left", padx=8)
-        theme_cb.bind("<<ComboboxSelected>>", lambda e: app.change_theme())
-        frow = ttk.Frame(look)
-        frow.pack(fill="x", pady=(6, 0))
-        ttk.Label(frow, text="Шрифт таблицы:").pack(side="left")
-        font_cb = ttk.Combobox(frow, textvariable=app.font_var, values=list(FONT_LABELS.values()), state="readonly", width=18)
-        font_cb.pack(side="left", padx=8)
-        font_cb.bind("<<ComboboxSelected>>", lambda e: app.change_table_font())
+        look = widgets.section(body, "Внешний вид")
+        widgets.PopupSelect(look.row("Тема"), app.theme_var, list(THEME_LABELS.values()), command=app.change_theme).pack()
+        widgets.PopupSelect(look.row("Шрифт таблицы"), app.font_var, list(FONT_LABELS.values()),
+                            command=app.change_table_font).pack()
 
-        dbox = ttk.LabelFrame(body, text="Данные", padding=8)
-        dbox.pack(fill="x", pady=(10, 0))
-        ttk.Label(dbox, text="Перенос на другой компьютер: настройки, организации, участки и карточки собственников "
-                             "одним файлом. В файле есть персональные данные — передавайте его защищённо.",
-                  style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w")
-        drow = ttk.Frame(dbox)
-        drow.pack(anchor="w", pady=(6, 0))
-        ttk.Button(drow, text="Экспорт данных…", command=self.export_data).pack(side="left")
-        ttk.Button(drow, text="Импорт данных…", command=self.import_data).pack(side="left", padx=(6, 0))
+        dbox = widgets.section(body, "Данные")
+        ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
+        ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
-        orgs = ttk.LabelFrame(body, text="Организации", padding=8)
-        orgs.pack(fill="x", pady=(10, 0))
-        ttk.Label(orgs, text="Реквизиты, дома, тексты претензий, письма и заявлений для каждой организации.",
-                  style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w")
-        ttk.Button(orgs, text="Организации…", command=app.edit_orgs).pack(anchor="w", pady=(6, 0))
+        orgs = widgets.section(body, "Организации")
+        ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
-        cf = ttk.LabelFrame(body, text="Судебные участки", padding=8)
-        cf.pack(fill="x", pady=(10, 0))
-        line2 = ttk.Frame(cf)
-        line2.pack(fill="x")
-        ttk.Label(line2, text="Коды регионов:").pack(side="left")
+        cf = widgets.section(body, "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])
-        ttk.Entry(line2, textvariable=self.regions, width=14).pack(side="left", padx=6)
-        ttk.Label(line2, text="(61 — Ростовская обл.; несколько — через запятую)", style="Muted.TLabel").pack(side="left")
-        self.courts_lbl = ttk.Label(cf, text="", wraplength=420, justify="left")
-        self.courts_lbl.pack(anchor="w", pady=(6, 0))
-        brow = ttk.Frame(cf)
-        brow.pack(anchor="w", pady=(6, 0))
-        ttk.Button(brow, text="Загрузить список участков с sudrf.ru", command=self.load_courts).pack(side="left")
-        ttk.Button(brow, text="Судьи и адреса участков…", command=self.edit_courts).pack(side="left", padx=(6, 0))
+        ttk.Entry(cf.row("Коды регионов"), textvariable=self.regions, width=14).pack()
+        right = cf.row("Загружено")
+        self.courts_lbl = tk.Label(right, text="", bd=0)
+        self.courts_lbl.role = "muted"
+        self.courts_lbl.pack()
+        ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
+        ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
         self.show_courts_info()
+        widgets.retheme(self)
 
-        btns = ttk.Frame(body)
-        btns.pack(fill="x", pady=(12, 0))
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", padx=16, pady=12)
         ttk.Button(btns, text="Готово", command=self.close).pack(side="right")
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Return>", lambda e: self.close())
         self.bind("<Escape>", lambda e: self.close())
+        self.update_idletasks()
+        h = min(canvas.bbox("all")[3] + 70, self.winfo_screenheight() - 140)
+        self.geometry(f"640x{h}")
+        self.resizable(False, True)
+        app.settings_dialog = self
         center_over(self, app)
+
+    def destroy(self):
+        self.app.settings_dialog = None
+        super().destroy()
 
     def export_data(self):
         if not messagebox.askokcancel("Экспорт данных", "В файл попадут персональные данные собственников. "
@@ -2560,7 +2543,10 @@ class OwnerDialog(tk.Toplevel):
                 var.trace_add("write", lambda *a: self._sync())
         self.unknown = tk.BooleanVar(value=self.card.unknown)
         self.unknown.trace_add("write", lambda *a: self.update_mode())
-        ttk.Checkbutton(obox, text="Собственники неизвестны (шаблон без ФИО)", variable=self.unknown).pack(anchor="w", pady=(4, 0))
+        urow = ttk.Frame(obox)
+        urow.pack(fill="x", pady=(6, 0))
+        ttk.Label(urow, text="Собственники неизвестны (шаблон без ФИО)").pack(side="left")
+        widgets.Switch(urow, self.unknown, surface="window").pack(side="right")
 
         # --- остальные данные (по помещению) ---
         self.vars: dict[str, tk.StringVar] = {}
