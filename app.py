@@ -1886,6 +1886,7 @@ class SettingsDialog(Dialog):
         widgets.PopupSelect(rules.row("Сортировать по"), app.sort_var, app.sort_options).pack()
         widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()
         ttk.Button(rules.row("Признаки организаций"), text="Изменить…", command=app.edit_markers).pack()
+        ttk.Button(rules.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
         look = widgets.section(left, "Внешний вид")
         widgets.PopupSelect(look.row("Тема"), app.theme_var, list(THEME_LABELS.values()), command=app.change_theme).pack()
@@ -1896,8 +1897,9 @@ class SettingsDialog(Dialog):
         ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
         ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
-        orgs = widgets.section(left, "Организации")
-        ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
+        dty = widgets.section(left, "Госпошлина")
+        widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
+        ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
 
         cf = widgets.section(right, "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])
@@ -1908,10 +1910,6 @@ class SettingsDialog(Dialog):
         self.courts_lbl.pack()
         ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
         ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
-        dty = widgets.section(right, "Госпошлина")
-        widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
-        ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
-
         self.show_courts_info()
         widgets.retheme(self)
 
