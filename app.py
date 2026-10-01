@@ -302,6 +302,7 @@ def _system_dark_windows() -> bool:
 def set_window_appearance(root: tk.Misc, win: tk.Misc, mode: str) -> None:
     """macOS: светлое/тёмное оформление окна (auto — как в системе)."""
     try:
+        win.update_idletasks()                          # окно должно уже существовать, иначе Tk не может выставить оформление
         root.tk.call("::tk::unsupported::MacWindowStyle", "appearance", win,
                      {"light": "aqua", "dark": "darkaqua"}.get(mode, "auto"))
     except tk.TclError:
@@ -1761,6 +1762,8 @@ class SettingsDialog(tk.Toplevel):
         self.app = app
         self.title("Настройки")
         self.transient(app)
+        if _is_mac(app):                                           # тема окна — до построения, чтобы цвета блоков считались верно
+            set_window_appearance(app, self, app.settings.theme)
 
         # прокручиваемая форма из блоков-карточек в стиле системных настроек
         outer = ttk.Frame(self)
@@ -2293,6 +2296,8 @@ class WelcomeDialog(tk.Toplevel):
         self.app = app
         self.title("Добро пожаловать")
         self.transient(app)
+        if _is_mac(app):
+            set_window_appearance(app, self, app.settings.theme)
         body = ttk.Frame(self, padding=18)
         body.pack(fill="both", expand=True)
         ttk.Label(body, text="Должники", font=("", 18, "bold")).pack(anchor="w")
@@ -2490,6 +2495,8 @@ class OwnerDialog(tk.Toplevel):
     def __init__(self, app: "App", info: dict, org: orgmod.Organization):
         super().__init__(app)
         self.app, self.info, self.org = app, info, org
+        if _is_mac(app):
+            set_window_appearance(app, self, app.settings.theme)
         self.card = owners.get_or_new(info["address"], info["flat"])
         # рабочая копия списка собственников; нет сохранённых — один собственник по ФИО из отчёта
         self.owner_list = [replace(o) for o in self.card.owners] or \

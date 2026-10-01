@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import tkinter as tk
+import tkinter.font as tkfont
 from tkinter import ttk
 
 
@@ -12,6 +13,17 @@ def _mix(root: tk.Misc, a: str, b: str, k: float) -> str:
     main = root.nametowidget(".")
     (r1, g1, b1), (r2, g2, b2) = main.winfo_rgb(a), main.winfo_rgb(b)
     return "#%02x%02x%02x" % tuple(int((x + (y - x) * k) / 257) for x, y in ((r1, r2), (g1, g2), (b1, b2)))
+
+
+def bold_font(root: tk.Misc) -> tkfont.Font:
+    """Системный шрифт того же размера, что и обычный текст, но жирный — как заголовки блоков в настройках macOS."""
+    main = root.nametowidget(".")
+    f = getattr(main, "_bold_font", None)
+    if f is None:
+        f = tkfont.nametofont("TkDefaultFont").copy()
+        f.configure(weight="bold")
+        main._bold_font = f
+    return f
 
 
 def palette(root: tk.Misc) -> dict:
@@ -43,7 +55,7 @@ def palette(root: tk.Misc) -> dict:
 
 class Switch(tk.Canvas):
     """Переключатель вместо флажка; связан с BooleanVar."""
-    W, H = 40, 22
+    W, H = 28, 16
 
     def __init__(self, parent, variable: tk.BooleanVar, command=None, surface: str = "card"):
         super().__init__(parent, width=self.W, height=self.H, highlightthickness=0, bd=0, cursor="hand2")
@@ -70,8 +82,8 @@ class Switch(tk.Canvas):
         self.create_oval(1, 1, h - 1, h - 1, fill=color, outline=color)
         self.create_oval(self.W - h + 1, 1, self.W - 1, h - 1, fill=color, outline=color)
         self.create_rectangle(h // 2, 1, self.W - h // 2, h - 1, fill=color, outline=color)
-        x = self.W - h + 3 if on else 3
-        self.create_oval(x, 3, x + h - 6, h - 3, fill="#ffffff", outline="#ffffff")
+        x = self.W - h + 2 if on else 2
+        self.create_oval(x, 2, x + h - 4, h - 2, fill="#ffffff", outline="#ffffff")
 
 
 class PopupSelect(tk.Frame):
@@ -83,7 +95,7 @@ class PopupSelect(tk.Frame):
         self.pal = palette(self)
         self.lbl = tk.Label(self, textvariable=variable, bd=0, padx=0)
         self.lbl.pack(side="left", padx=(0, 6))
-        self.chip = tk.Canvas(self, width=20, height=22, highlightthickness=0, bd=0)
+        self.chip = tk.Canvas(self, width=16, height=16, highlightthickness=0, bd=0)
         self.chip.pack(side="left")
         for w in (self, self.lbl, self.chip):
             w.bind("<Button-1>", self.open)
@@ -97,10 +109,9 @@ class PopupSelect(tk.Frame):
         c = self.chip
         c.configure(bg=p["card"])
         c.delete("all")
-        c.create_rectangle(1, 1, 19, 21, fill=p["chip"], outline=p["chip"])
-        c.create_rectangle(0, 3, 20, 19, fill=p["chip"], outline=p["chip"])
-        c.create_line(6.5, 9, 10, 5.5, 13.5, 9, fill=p["fg"], width=2, capstyle="round", joinstyle="round")     # вверх
-        c.create_line(6.5, 13, 10, 16.5, 13.5, 13, fill=p["fg"], width=2, capstyle="round", joinstyle="round")    # вниз
+        c.create_rectangle(0, 0, 16, 16, fill=p["chip"], outline=p["chip"])
+        c.create_line(5, 6.5, 8, 3.5, 11, 6.5, fill=p["fg"], width=1.6, capstyle="round", joinstyle="round")      # вверх
+        c.create_line(5, 9.5, 8, 12.5, 11, 9.5, fill=p["fg"], width=1.6, capstyle="round", joinstyle="round")     # вниз
 
     def open(self, _e=None):
         menu = tk.Menu(self, tearoff=0)
@@ -142,7 +153,7 @@ class Card(tk.Frame):
 
 def section(parent: tk.Misc, title: str, pady: tuple = (14, 0)) -> Card:
     """Заголовок блока (жирным над карточкой) и сама карточка."""
-    head = ttk.Label(parent, text=title, font=("", 13, "bold"))
+    head = ttk.Label(parent, text=title, font=bold_font(parent))
     head.pack(anchor="w", pady=(pady[0], 5), padx=2)
     card = Card(parent)
     card.pack(fill="x")
@@ -152,7 +163,7 @@ def section(parent: tk.Misc, title: str, pady: tuple = (14, 0)) -> Card:
 class Badge(tk.Canvas):
     """Круглый значок с номером шага."""
 
-    def __init__(self, parent, number: int, surface: str = "field", size: int = 26):
+    def __init__(self, parent, number: int, surface: str = "field", size: int = 22):
         super().__init__(parent, width=size, height=size, highlightthickness=0, bd=0)
         self.number, self.size, self.surface, self.role = number, size, surface, "badge"
         self.redraw(palette(self))
@@ -162,7 +173,7 @@ class Badge(tk.Canvas):
         self.configure(bg=pal["field"] if self.surface == "field" else pal["bg"])
         self.delete("all")
         self.create_oval(1, 1, s - 1, s - 1, fill=pal["accent"], outline=pal["accent"])
-        self.create_text(s / 2, s / 2 + 0.5, text=str(self.number), fill="#ffffff", font=("", 12, "bold"))
+        self.create_text(s / 2, s / 2 + 0.5, text=str(self.number), fill="#ffffff", font=bold_font(self))
 
 
 def steps_list(parent: tk.Misc, steps, surface: str = "field", wrap: int = 470) -> tk.Frame:
@@ -177,7 +188,7 @@ def steps_list(parent: tk.Misc, steps, surface: str = "field", wrap: int = 470) 
         col = tk.Frame(row, bd=0)
         col.role = surface
         col.pack(side="left", fill="x")
-        t = tk.Label(col, text=title, bd=0, anchor="w", font=("", 12, "bold"), justify="left")
+        t = tk.Label(col, text=title, bd=0, anchor="w", font=bold_font(parent), justify="left")
         t.role = f"{surface}-label"
         t.pack(anchor="w")
         d = tk.Label(col, text=detail, bd=0, anchor="w", justify="left", wraplength=wrap)
