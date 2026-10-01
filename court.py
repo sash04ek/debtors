@@ -177,7 +177,7 @@ def build_court_application(org: Organization, card: Card, case: Case, *, path: 
     para("**о выдаче судебного приказа**", C, 12, after=8)
 
     # текст заявления
-    since = card.managed_since.strip() or house_since(org, card.address)   # дата из списка домов организации
+    since = house_since(org, card.address)   # дата из списка домов организации
     body(f"Многоквартирный дом {house} по {street} с {_v(since)} находится в управлении "
          f"{org.name} Заявитель управляет и обеспечивает содержание и ремонт имущества указанного жилого дома.")
     tariffs = ("Порядок расчёта, цены, ставки и тарифы на жилищно-коммунальные услуги для населения ежегодно "

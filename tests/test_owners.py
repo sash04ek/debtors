@@ -13,11 +13,12 @@ from docx import Document  # noqa: E402
 
 class StorageTest(unittest.TestCase):
     def setUp(self):
-        self.old = O.OWNERS_PATH
-        O.OWNERS_PATH = Path(tempfile.mkdtemp()) / "owners.json"
+        self.old = O.OWNERS_PATH, O.TRASH_PATH
+        tmp = Path(tempfile.mkdtemp())
+        O.OWNERS_PATH, O.TRASH_PATH = tmp / "owners.json", tmp / "trash.json"
 
     def tearDown(self):
-        O.OWNERS_PATH = self.old
+        O.OWNERS_PATH, O.TRASH_PATH = self.old
 
     def test_save_load_delete_roundtrip_with_several_owners(self):
         card = O.Card(address="Сызранова ул 28-1", flat="13", penalty="600",

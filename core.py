@@ -46,6 +46,14 @@ class Settings:
     sort_col: str | None = None         # по какой колонке сортировать перед отбором N; None = по сумме долга
     sort_desc: bool = True              # True — по убыванию (от большего к меньшему)
     page_size: int = 50                 # строк таблицы на одной странице
+    col_widths: dict = field(default_factory=dict)       # ширина колонок таблицы, заданная мышью: заголовок -> пиксели
+    hidden_cols: list[str] = field(default_factory=list)  # скрытые колонки таблицы (по заголовку)
+    courts_query: str = ""              # текст в поиске окна «Судьи и адреса участков» — запоминается между открытиями
+    out_dir: str = ""                   # папка, куда создаются документы (запоминается)
+    recent_files: list[str] = field(default_factory=list)   # последние открытые файлы (новые первыми)
+    welcomed: bool = False              # приветствие первого запуска уже показано
+    geometry: str = ""                  # размер и положение главного окна («980x700+120+60»)
+    table_font: str = "normal"          # размер шрифта таблицы: normal / large / xlarge
     theme: str = "system"               # оформление: system — как в системе, light — светлое, dark — тёмное
     org_markers: list[str] = field(default_factory=lambda: list(DEFAULT_ORG_MARKERS))
     markers_version: int = MARKERS_VERSION   # для дозаписи новых слов в сохранённый список

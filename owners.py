@@ -142,10 +142,60 @@ def save_card(card: Card) -> None:
     _save_all(data)
 
 
+TRASH_PATH = storage.TRASH_PATH
+TRASH_DAYS = 30                                   # сколько дней удалённая карточка лежит в корзине
+
+
+def _load_trash() -> dict[str, dict]:
+    try:
+        data = json.loads(TRASH_PATH.read_text(encoding="utf-8"))
+        return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_trash(data: dict[str, dict]) -> None:
+    TRASH_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    try:
+        os.chmod(TRASH_PATH, 0o600)
+    except OSError:
+        pass
+
+
 def delete_card(address, flat) -> None:
+    """Удаляет карточку в корзину: её можно восстановить в течение TRASH_DAYS дней."""
+    from datetime import date, timedelta
+    key = make_key(address, flat)
     data = _load_all()
-    if data.pop(make_key(address, flat), None) is not None:
+    card = data.pop(key, None)
+    if card is None:
+        return
+    trash = _load_trash()
+    limit = (date.today() - timedelta(days=TRASH_DAYS)).isoformat()
+    trash = {k: v for k, v in trash.items() if str(v.get("deleted", "")) >= limit}      # старое из корзины убираем
+    trash[key] = {"card": card, "deleted": date.today().isoformat()}
+    _save_trash(trash)
+    _save_all(data)
+
+
+def has_trashed(address, flat) -> bool:
+    return make_key(address, flat) in _load_trash()
+
+
+def restore_card(address, flat) -> Card | None:
+    """Возвращает удалённую карточку из корзины (если на её месте нет новой). None — в корзине её нет."""
+    key = make_key(address, flat)
+    trash = _load_trash()
+    item = trash.get(key)
+    if not item:
+        return None
+    data = _load_all()
+    if key not in data:
+        data[key] = item["card"]
         _save_all(data)
+    trash.pop(key)
+    _save_trash(trash)
+    return _from_dict(data[key])
 
 
 _LOWER_PARTS = {"оглы", "кызы", "улы", "кизи", "гызы"}
