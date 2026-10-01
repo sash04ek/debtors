@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 import tkinter as tk
+import tkinter.font as tkfont
 from dataclasses import asdict, replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -46,6 +47,24 @@ def save_settings(s: core.Settings) -> None:
         pass
 
 
+def make_tip(parent: tk.Misc, text: str) -> tk.Toplevel:
+    """Безрамочное окошко-подсказка (на macOS — системного стиля)."""
+    tip = tk.Toplevel(parent)
+    try:
+        if tip.tk.call("tk", "windowingsystem") == "aqua":
+            # на macOS обычное безрамочное окно не рисуется — берём системный стиль подсказки
+            tip.tk.call("::tk::unsupported::MacWindowStyle", "style", tip._w, "help", "noActivates")
+        else:
+            tip.wm_overrideredirect(True)
+        tip.wm_attributes("-topmost", True)
+    except tk.TclError:
+        tip.wm_overrideredirect(True)
+    tk.Label(tip, text=text, background="#ffffe0", foreground="#202020", relief="solid",
+             borderwidth=1, padx=6, pady=2, justify="left", wraplength=520).pack()
+    tip.update_idletasks()
+    return tip
+
+
 class Tooltip:
     """Всплывающая подсказка при наведении на виджет."""
 
@@ -62,19 +81,7 @@ class Tooltip:
 
     def _show(self):
         self._job = None
-        tip = self._tip = tk.Toplevel(self.widget)
-        try:
-            if tip.tk.call("tk", "windowingsystem") == "aqua":
-                # на macOS обычное безрамочное окно не рисуется — берём системный стиль подсказки
-                tip.tk.call("::tk::unsupported::MacWindowStyle", "style", tip._w, "help", "noActivates")
-            else:
-                tip.wm_overrideredirect(True)
-            tip.wm_attributes("-topmost", True)
-        except tk.TclError:
-            tip.wm_overrideredirect(True)
-        tk.Label(tip, text=self.text, background="#ffffe0", foreground="#202020", relief="solid",
-                 borderwidth=1, padx=6, pady=2).pack()
-        tip.update_idletasks()
+        tip = self._tip = make_tip(self.widget, self.text)
         x = self.widget.winfo_rootx() + self.widget.winfo_width() - tip.winfo_reqwidth()
         y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
         tip.wm_geometry(f"+{max(0, x)}+{y}")
@@ -414,7 +421,7 @@ class App(tk.Tk):
         self.org_hint = ttk.Label(orow, text="", style="Muted.TLabel")
         self.org_hint.pack(side="left", padx=10)
         self.refresh_orgs()
-        self.org_cb.bind("<<ComboboxSelected>>", lambda e: self.save_state())
+        self.org_cb.bind("<<ComboboxSelected>>", lambda e: (self.save_state(), self.refresh_card_flags()))
 
         # значения настроек живут в переменных; окно «Настройки» лишь показывает их
         self.col_vars = {k: tk.StringVar() for k in COLUMN_FIELDS}
@@ -466,6 +473,13 @@ class App(tk.Tk):
         self.all_cb.pack(side="left")
         self.pick_lbl = ttk.Label(pick_bar, text="", style="Muted.TLabel")
         self.pick_lbl.pack(side="left", padx=12)
+        ttk.Button(pick_bar, text="✕", width=2, command=lambda: self.search_var.set("")).pack(side="right")
+        self.search_var = tk.StringVar()
+        self.search_entry = ttk.Entry(pick_bar, textvariable=self.search_var, width=26)
+        self.search_entry.pack(side="right", padx=(0, 4))
+        ttk.Label(pick_bar, text="Поиск:").pack(side="right", padx=(0, 4))
+        self._search_job = None
+        self.search_var.trace_add("write", lambda *_: self._schedule_search())
         self.bind("<FocusIn>", lambda e: e.widget is self and self.item_index and self.refresh_card_flags())
 
         # пагинация — отдельная строка под таблицей: в одной строке с отметками она не помещалась в окно
@@ -501,6 +515,12 @@ class App(tk.Tk):
         self.data_rows: list[list] = []                  # значения колонок данных для каждой строки
         self.check_state: list[bool] = []                # отметки по номеру строки результата
         self.order: list[int] = []                       # порядок показа (после сортировки кликом)
+        self.order_all: list[int] = []
+        self.card_flags: list[bool] = []
+        self.court_flags: list[bool] = []
+        self.visible_cols: list[str] = []
+        self.num_cols: set[int] = set()
+        self.manual_widths = False
         self.page = 0
         self._page_first = 0
         self.tree.bind("<Configure>", lambda e: self.fit_columns())
@@ -509,6 +529,7 @@ class App(tk.Tk):
         self.tree.bind("<Double-Button-1>", self.on_tree_double)
         self._build_context_menu()
         self._bind_shortcuts()
+        self._bind_table_extras()
         apply_palette(self)
         ys.grid(row=0, column=1, sticky="ns")
         xs.grid(row=1, column=0, sticky="we")
@@ -534,6 +555,7 @@ class App(tk.Tk):
         self.bind_all("<F5>", lambda e: (self.on_filter_button(), "break")[1])
         self.bind_all(f"<{mod}-Return>", lambda e: (self.on_filter_button(), "break")[1])
         self.tree.bind(f"<{mod}-c>", lambda e: (self.copy_rows(), "break")[1])
+        self.bind_all(f"<{mod}-f>", lambda e: (self.search_entry.focus_set(), self.search_entry.select_range(0, "end"), "break")[2])
         Tooltip(self.filter_btn, f"Применить или сбросить фильтр (F5, {'⌘' if mod == 'Command' else 'Ctrl+'}Enter)")
 
     def _select_all_rows(self):
@@ -550,6 +572,8 @@ class App(tk.Tk):
             self.tree.bind(seq, self.show_context_menu, add="+")
 
     def show_context_menu(self, event):
+        if self.tree.identify_region(event.x, event.y) == "heading":
+            return self.show_header_menu(event)
         item = self.tree.identify_row(event.y)
         if not item:
             return
@@ -566,8 +590,110 @@ class App(tk.Tk):
             self._toggle_item(item)
         self.refresh_pick_state()
 
+    # ---------- ширина и видимость колонок, подсказка с полным текстом ячейки ----------
+    def _bind_table_extras(self):
+        self._press_region = ""
+        self._cell_job, self._cell_tip, self._cell_key = None, None, None
+        self.tree.bind("<ButtonPress-1>", lambda e: setattr(self, "_press_region", self.tree.identify_region(e.x, e.y)), add="+")
+        self.tree.bind("<ButtonRelease-1>", self._after_drag, add="+")
+        self.tree.bind("<Motion>", self._cell_hover, add="+")
+        self.tree.bind("<Leave>", lambda e: self._hide_cell_tip(), add="+")
+        self.tree.bind("<ButtonPress>", lambda e: self._hide_cell_tip(), add="+")
+        self.tree.bind("<MouseWheel>", lambda e: self._hide_cell_tip(), add="+")
+
+    def _after_drag(self, event):
+        """Ширину колонки потянули мышью — запоминаем ширины всех колонок и больше не подгоняем их автоматически."""
+        if self._press_region != "separator" or not self.cols:
+            return
+        self._press_region = ""
+        widths = dict(self.settings.col_widths)
+        for i, h in enumerate(self.cols):
+            if not (self.has_checks and h in SERVICE_COLS) and f"c{i}" in self.visible_cols:
+                widths[h] = int(self.tree.column(f"c{i}", "width"))
+        self.settings.col_widths = widths
+        self.manual_widths = True
+        self.save_settings_now()
+
+    def auto_widths(self):
+        self.settings.col_widths = {}
+        self.manual_widths = False
+        for i, h in enumerate(self.cols):
+            self.tree.column(f"c{i}", width=self.col_weights.get(f"c{i}", 130))
+        self.fit_columns()
+        self.save_settings_now()
+
+    def _data_titles(self) -> list[str]:
+        return [h for h in self.cols if not (self.has_checks and h in SERVICE_COLS)]
+
+    def apply_hidden(self):
+        hidden = set(self.settings.hidden_cols)
+        self.visible_cols = [f"c{i}" for i, h in enumerate(self.cols)
+                             if (self.has_checks and h in SERVICE_COLS) or h not in hidden]
+        self.tree["displaycolumns"] = self.visible_cols or "#all"
+
+    def toggle_column(self, title: str):
+        hidden = set(self.settings.hidden_cols)
+        hidden.symmetric_difference_update({title})
+        self.settings.hidden_cols = sorted(hidden)
+        self.apply_hidden()
+        self.fit_columns()
+        self.save_settings_now()
+
+    def show_all_columns(self):
+        self.settings.hidden_cols = []
+        self.apply_hidden()
+        self.fit_columns()
+        self.save_settings_now()
+
+    def show_header_menu(self, event):
+        if not self.cols:
+            return
+        menu = tk.Menu(self, tearoff=0)
+        hidden = set(self.settings.hidden_cols)
+        self._col_vars = []
+        for title in self._data_titles():
+            var = tk.BooleanVar(value=title not in hidden)
+            self._col_vars.append(var)
+            menu.add_checkbutton(label=title, variable=var, command=lambda t=title: self.toggle_column(t))
+        menu.add_separator()
+        menu.add_command(label="Показать все колонки", command=self.show_all_columns)
+        menu.add_command(label="Автоширина колонок", command=self.auto_widths)
+        menu.tk_popup(event.x_root, event.y_root)
+        return "break"
+
+    def _cell_hover(self, event):
+        key = (self.tree.identify_row(event.y), self.tree.identify_column(event.x))
+        if key == self._cell_key:
+            return
+        self._hide_cell_tip()
+        self._cell_key = key
+        if self.tree.identify_region(event.x, event.y) == "cell" and key[0]:
+            self._cell_job = self.after(500, lambda: self._show_cell_tip(key, event.x_root, event.y_root))
+
+    def _show_cell_tip(self, key, x, y):
+        self._cell_job = None
+        item, col = key
+        try:
+            text = str(self.tree.set(item, col))
+            width = int(self.tree.column(col, "width"))
+        except tk.TclError:
+            return
+        if not text or tkfont.nametofont("TkDefaultFont").measure(text) + 14 <= width:
+            return                                                  # текст помещается — подсказка не нужна
+        self._cell_tip = make_tip(self, text)
+        self._cell_tip.wm_geometry(f"+{x + 12}+{y + 16}")
+
+    def _hide_cell_tip(self):
+        if self._cell_job:
+            self.after_cancel(self._cell_job)
+            self._cell_job = None
+        if self._cell_tip is not None:
+            self._cell_tip.destroy()
+            self._cell_tip = None
+        self._cell_key = None
+
     def copy_rows(self):
-        rows = ["\t".join(str(v) for v in self.tree.item(i, "values")[3 if self.has_checks else 0:])
+        rows = ["\t".join(str(v) for v in self.tree.item(i, "values")[N_SERVICE if self.has_checks else 0:])
                 for i in self.tree.selection()]
         if rows:
             self.clipboard_clear()
@@ -880,7 +1006,7 @@ class App(tk.Tk):
 
     def refresh_pick_state(self):
         n, total = sum(self.check_state), len(self.check_state)
-        self.all_var.set(total > 0 and n == total)
+        self.all_var.set(bool(self.order) and all(self.check_state[i] for i in self.order) if self.has_checks else False)
         text = ""
         if self.has_checks:
             text = f"Отмечено адресов: {n} из {total}"
@@ -892,7 +1018,8 @@ class App(tk.Tk):
     def toggle_all(self):
         if not self.has_checks:
             return
-        self.check_state = [self.all_var.get()] * len(self.check_state)      # все страницы сразу
+        for i in self.order:                                                  # все страницы сразу, но только найденные строки
+            self.check_state[i] = self.all_var.get()
         for item in self.tree.get_children():
             self.set_check(item, self.check_state[self.item_index[item]])
         self.refresh_pick_state()
@@ -1223,43 +1350,78 @@ class App(tk.Tk):
 
     def show_rows(self, headers, rows, numbered=False):
         """Загружает данные в таблицу и показывает первую страницу. numbered — режим результата (✓, №, отметки)."""
-        self.cols = (["✓", "№", "Данные"] if numbered else []) + list(headers)
+        self.cols = (list(SERVICE_COLS) if numbered else []) + list(headers)
         self.has_checks = numbered
         self.data_rows = [["" if v is None else v for v in r] for r in rows]
         self.check_state = [True] * len(rows) if numbered else []
-        self.order = list(range(len(rows)))
+        self.order_all = list(range(len(rows)))                  # порядок после сортировки кликом (без учёта поиска)
+        self.order = list(self.order_all)                         # то, что показано: порядок + поиск
+        self.haystack = [" ".join(str(v) for v in r).lower() for r in self.data_rows]
         self.view_sort = None
         self.page = 0
+        self.search_var.set("")
         self.compute_card_flags()
+        debt = self.settings.debt_col
+        nser = N_SERVICE if numbered else 0
+        self.num_cols = {j for j in range(len(headers))
+                         if headers[j] == debt or any(isinstance(r[j], float) for r in self.data_rows)}
         self.col_titles = {f"c{i}": h for i, h in enumerate(self.cols)}
         self.tree["columns"] = [f"c{i}" for i in range(len(self.cols))]
+        saved = self.settings.col_widths
+        self.manual_widths = False
         for i, h in enumerate(self.cols):
+            service = numbered and h in SERVICE_COLS
             self.tree.heading(f"c{i}", text=h, command=lambda c=f"c{i}": self.sort_view(c))
-            small = numbered and h in SERVICE_COLS
-            self.tree.column(f"c{i}", width=SERVICE_COLS[h] if small else col_width(h),
-                             minwidth=36 if small else 50, stretch=False, anchor="center" if small else "w")
+            width = SERVICE_COLS[h] if service else col_width(h)
+            if not service and h in saved:
+                width, self.manual_widths = int(saved[h]), True
+            anchor = "center" if service else ("e" if i - nser in self.num_cols else "w")
+            self.tree.column(f"c{i}", width=width, minwidth=36 if service else 50, stretch=False, anchor=anchor)
         self.col_weights = {f"c{i}": SERVICE_COLS[h] if (numbered and h in SERVICE_COLS) else col_width(h)
                             for i, h in enumerate(self.cols)}
         self.fixed_cols = {f"c{i}" for i, h in enumerate(self.cols) if numbered and h in SERVICE_COLS}
         self.all_cb.config(state="normal" if numbered and rows else "disabled")
+        self.apply_hidden()
         self.fit_columns()
         self.render_page()
 
     def fit_columns(self):
         """Ширина колонок подгоняется под ширину окна пропорционально их «весу», поэтому таблица
-        помещается без горизонтальной прокрутки (узкие служебные колонки ✓ и № не сжимаются)."""
+        помещается без горизонтальной прокрутки (узкие служебные колонки не сжимаются).
+        Если ширину колонок задали мышью — она сохраняется, автоподгонка не применяется."""
         weights = getattr(self, "col_weights", None)
-        if not weights:
+        if not weights or getattr(self, "manual_widths", False):
             return
         avail = self.tree.winfo_width() - 6
         if avail < 200:                                         # окно ещё не показано
             return
-        fixed = sum(w for c, w in weights.items() if c in self.fixed_cols)
-        flex = {c: w for c, w in weights.items() if c not in self.fixed_cols}
+        shown = set(getattr(self, "visible_cols", weights))
+        fixed = sum(w for c, w in weights.items() if c in self.fixed_cols and c in shown)
+        flex = {c: w for c, w in weights.items() if c not in self.fixed_cols and c in shown}
         total = sum(flex.values()) or 1
         room = max(avail - fixed, 50 * len(flex))
         for c, w in flex.items():
             self.tree.column(c, width=max(50, int(room * w / total)))
+
+    def fmt_cell(self, j: int, v):
+        """Числа с копейками показываются одинаково: 1 234,50 (в данных остаются числа — сортировка не страдает)."""
+        if j in self.num_cols and isinstance(v, (int, float)) and not isinstance(v, bool):
+            return fmt_money(float(v))
+        return v
+
+    # --- поиск ---
+    def _schedule_search(self):
+        if self._search_job:
+            self.after_cancel(self._search_job)
+        self._search_job = self.after(200, self.apply_search)
+
+    def apply_search(self):
+        """Оставляет в таблице только строки, где встречается введённый текст (по всем колонкам, без учёта регистра)."""
+        self._search_job = None
+        q = self.search_var.get().strip().lower()
+        self.order = [i for i in self.order_all if q in self.haystack[i]] if q else list(self.order_all)
+        self.page = 0
+        self.render_page()
 
     # --- страницы ---
     def _page_size(self) -> int:
@@ -1302,7 +1464,7 @@ class App(tk.Tk):
         self.item_index = {}
         for pos in range(start, min(start + size, len(self.order))):
             idx = self.order[pos]
-            vals = ([("☑" if self.check_state[idx] else "☐"), idx + 1, "✓" if self.card_flags[idx] else ""] if self.has_checks else []) + self.data_rows[idx]
+            vals = self.service_values(idx) + [self.fmt_cell(j, v) for j, v in enumerate(self.data_rows[idx])]
             self.item_index[self.tree.insert("", "end", values=vals, tags=("odd",) if pos % 2 else ())] = idx
         total, tp = len(self.order), self.total_pages()
         self.page_lbl.config(text=f"Стр. {self.page + 1} из {tp}")
@@ -1314,50 +1476,59 @@ class App(tk.Tk):
             b.state([fwd])
         self.refresh_pick_state()
 
+    def service_values(self, idx: int) -> list:
+        if not self.has_checks:
+            return []
+        return [("☑" if self.check_state[idx] else "☐"), idx + 1,
+                "✓" if self.card_flags[idx] else "", "✓" if self.court_flags[idx] else ""]
+
     def compute_card_flags(self):
         """Для каждой строки результата: есть ли карточка с персональными данными собственника."""
         n = len(self.data_rows) if self.has_checks else 0
         self.card_flags = [False] * n
+        self.court_flags = [False] * n                    # известен ли судебный участок (в карточке или за домом)
         if not (n and self.result and self.result.top and self.settings.addr_col and self.settings.flat_col):
             return
-        cards = owners._load_all()
+        cards, org = owners._load_all(), self.current_org()
         for idx in range(min(n, len(self.result.top))):
             info = self.row_info(idx)
             d = cards.get(owners.make_key(info["address"], info["flat"]))
             if d:
-                self.card_flags[idx] = any(getattr(o, k).strip() for o in owners._from_dict(d).owners
-                                           for k in owners.OWNER_FIELDS)
+                card = owners._from_dict(d)
+                self.card_flags[idx] = any(getattr(o, k).strip() for o in card.owners for k in owners.OWNER_FIELDS)
+            self.court_flags[idx] = bool((d and d.get("court_code")) or orgmod.house_court(org, info["address"]))
 
     def refresh_card_flags(self):
-        """Карточки могли измениться в диалоге — обновляем колонку «Данные» на видимой странице."""
+        """Карточки, дома или организация могли измениться — обновляем колонки «Данные» и «Участок» на видимой странице."""
         if not self.has_checks:
             return
         self.compute_card_flags()
         for item, idx in self.item_index.items():
             vals = list(self.tree.item(item, "values"))
-            vals[2] = "✓" if self.card_flags[idx] else ""
+            vals[:N_SERVICE] = self.service_values(idx)
             self.tree.item(item, values=vals)
 
     def sort_view(self, colid: str):
         """Сортировка таблицы кликом по заголовку — по всему списку, а не только по видимой странице.
         Первый клик — по возрастанию, повторный — по убыванию. Меняет только порядок показа;
         какие должники отобраны — определяет «Сортировать по» в настройках."""
-        if not self.order:
+        if not self.order_all:
             return
         ci = int(colid[1:])
-        j = ci - (3 if self.has_checks else 0)                    # позиция в data_rows
+        j = ci - (N_SERVICE if self.has_checks else 0)                    # позиция в data_rows
         if self.has_checks and ci == 0:
             getter = lambda idx: 1 if self.check_state[idx] else 0
         elif self.has_checks and ci == 1:
             getter = lambda idx: idx + 1
         elif self.has_checks and ci == 2:
             getter = lambda idx: 1 if self.card_flags[idx] else 0
+        elif self.has_checks and ci == 3:
+            getter = lambda idx: 1 if self.court_flags[idx] else 0
         else:
             getter = lambda idx: self.data_rows[idx][j]
         desc = bool(self.view_sort and self.view_sort[0] == colid and not self.view_sort[1])
-        self.order = core.sort_by_values(list(self.order), getter, desc)
-        self.page = 0
-        self.render_page()
+        self.order_all = core.sort_by_values(list(self.order_all), getter, desc)
+        self.apply_search()
         self._mark_sort(colid, desc)
 
     def _mark_sort(self, colid: str, desc: bool):
@@ -1367,7 +1538,8 @@ class App(tk.Tk):
             self.tree.heading(cid, text=title + (("  ▼" if desc else "  ▲") if cid == colid else ""))
 
 
-SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64}      # служебные колонки таблицы результата и их ширина
+SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70}      # служебные колонки таблицы результата и их ширина
+N_SERVICE = len(SERVICE_COLS)
 
 COLUMN_FIELDS = {
     "name_col": "ФИО *",
