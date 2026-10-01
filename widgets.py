@@ -124,21 +124,47 @@ class PopupSelect(tk.Frame):
             self.command()
 
 
-class Card(tk.Frame):
-    """Блок со строками «название — элемент справа», разделёнными тонкими линиями."""
+class Card(tk.Canvas):
+    """Блок со строками «название — элемент справа», разделёнными тонкими линиями; рамка со скруглёнными углами."""
+    RADIUS, PAD_X, PAD_Y = 10, 2, 5
 
     def __init__(self, parent):
-        super().__init__(parent, bd=0, highlightthickness=1)
-        self.role, self._rows = "card", 0
+        super().__init__(parent, bd=0, highlightthickness=0, height=20)
+        self.role, self._rows = "card-rounded", 0
+        self.pal = palette(self)
+        self.body = tk.Frame(self, bd=0)
+        self.body.role = "card"
+        self._win = self.create_window(self.PAD_X, self.PAD_Y, window=self.body, anchor="nw")
+        self.body.bind("<Configure>", self._on_body)
+        self.bind("<Configure>", self._on_size)
+
+    def _on_body(self, _e=None):
+        self.configure(height=self.body.winfo_reqheight() + 2 * self.PAD_Y)
+
+    def _on_size(self, e):
+        self.itemconfigure(self._win, width=max(10, e.width - 2 * self.PAD_X))
+        self.redraw()
+
+    def redraw(self, pal: dict | None = None):
+        self.pal = pal or self.pal
+        p = self.pal
+        self.configure(bg=p["bg"])
+        self.delete("border")
+        w, h, r = self.winfo_width() - 1, self.winfo_height() - 1, self.RADIUS
+        if w < 2 * r or h < 2 * r:
+            return
+        pts = [r, 0, w - r, 0, w, 0, w, r, w, h - r, w, h, w - r, h, r, h, 0, h, 0, h - r, 0, r, 0, 0]
+        self.create_polygon(pts, smooth=True, splinesteps=12, fill=p["card"], outline=p["line"], width=1, tags="border")
+        self.tag_lower("border")
 
     def row(self, label: str = "", muted: bool = False) -> tk.Frame:
         """Добавляет строку; возвращает контейнер справа, куда кладётся элемент управления."""
         if self._rows:
-            line = tk.Frame(self, height=1, bd=0)
+            line = tk.Frame(self.body, height=1, bd=0)
             line.role = "line"
             line.pack(fill="x", padx=12)
         self._rows += 1
-        row = tk.Frame(self, bd=0)
+        row = tk.Frame(self.body, bd=0)
         row.role = "card"
         row.pack(fill="x", padx=12, pady=7)
         if label:
@@ -205,7 +231,9 @@ def retheme(widget: tk.Misc) -> None:
         role = getattr(w, "role", None)
         try:
             if role == "card":
-                w.configure(bg=pal["card"], **({"highlightbackground": pal["line"]} if isinstance(w, Card) else {}))
+                w.configure(bg=pal["card"])
+            elif role == "card-rounded":
+                w.redraw(pal)
             elif role == "line":
                 w.configure(bg=pal["line"])
             elif role == "label":
