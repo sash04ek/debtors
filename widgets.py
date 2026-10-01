@@ -58,7 +58,7 @@ class Switch(tk.Canvas):
     W, H = 28, 16
 
     def __init__(self, parent, variable: tk.BooleanVar, command=None, surface: str = "card"):
-        super().__init__(parent, width=self.W, height=self.H, highlightthickness=0, bd=0, cursor="hand2")
+        super().__init__(parent, width=self.W, height=self.H, highlightthickness=0, bd=0)
         self.var, self.command, self.role, self.surface = variable, command, "switch", surface
         self.pal = palette(self)
         self.bind("<Button-1>", self._toggle)
@@ -90,7 +90,7 @@ class PopupSelect(tk.Frame):
     """Выпадающий список как в настройках macOS: значение справа и кнопка со стрелками вверх/вниз."""
 
     def __init__(self, parent, variable: tk.StringVar, values, command=None):
-        super().__init__(parent, bd=0, highlightthickness=0, cursor="hand2")
+        super().__init__(parent, bd=0, highlightthickness=0)
         self.var, self.values, self.command, self.role = variable, list(values), command, "select"
         self.pal = palette(self)
         self.lbl = tk.Label(self, textvariable=variable, bd=0, padx=0)

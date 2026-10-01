@@ -472,11 +472,11 @@ class App(tk.Tk):
         try:
             self._gear = tk.PhotoImage(file=str(resource_path("assets/gear.png")))
             self._gear_hover = tk.PhotoImage(file=str(resource_path("assets/gear_hover.png")))
-            gear = ttk.Label(top, image=self._gear, cursor="pointinghand" if self.tk.call("tk", "windowingsystem") == "aqua" else "hand2")
+            gear = ttk.Label(top, image=self._gear)
             gear.bind("<Enter>", lambda e: gear.configure(image=self._gear_hover), add="+")
             gear.bind("<Leave>", lambda e: gear.configure(image=self._gear), add="+")
         except tk.TclError:
-            gear = ttk.Label(top, text="⚙", font=("", 18), cursor="hand2")
+            gear = ttk.Label(top, text="⚙", font=("", 18))
         gear.bind("<Button-1>", lambda e: self.open_settings())
         gear.pack(side="right", padx=(0, 4))
         Tooltip(gear, "Настройки")
