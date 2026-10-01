@@ -91,11 +91,8 @@ def _sort_key(name: str):
 
 
 def _read_file() -> dict:
-    try:
-        data = json.loads(COURTS_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    data = storage.load_json(COURTS_PATH, "courts", {})
+    return data if isinstance(data, dict) else {}
 
 
 def load() -> dict:
@@ -122,10 +119,10 @@ def save(regions: str, courts: list[Court], last: str = "", updated: str | None 
     """Сохраняет список. Ручные правки (overrides) сохраняются как были, если не переданы явно."""
     if overrides is None:
         overrides = _read_file().get("overrides") or {}
-    COURTS_PATH.write_text(json.dumps(
-        {"regions": regions, "updated": updated if updated is not None else date.today().isoformat(),
-         "courts": [{"code": c.code, "name": c.name, "address": c.base_address or c.address} for c in courts],
-         "last": last, "overrides": overrides}, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json(COURTS_PATH, "courts", {
+        "regions": regions, "updated": updated if updated is not None else date.today().isoformat(),
+        "courts": [{"code": c.code, "name": c.name, "address": c.base_address or c.address} for c in courts],
+        "last": last, "overrides": overrides})
 
 
 def save_last(code: str) -> None:
@@ -148,7 +145,7 @@ def set_override(code: str, judge: str, address: str) -> None:
     else:
         overrides.pop(code, None)
     data["overrides"] = overrides
-    COURTS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json(COURTS_PATH, "courts", data)
 
 
 def short_name(court: Court | None) -> str:

@@ -112,7 +112,7 @@ def default_orgs() -> list[Organization]:
 
 def load_orgs() -> list[Organization]:
     try:
-        data = json.loads(ORGS_PATH.read_text(encoding="utf-8"))
+        data = storage.load_json(ORGS_PATH, "orgs")
         names = {f.name for f in fields(Organization)}
         orgs = [Organization(**{k: v for k, v in d.items() if k in names}) for d in data]
         if orgs:
@@ -133,7 +133,7 @@ def load_orgs() -> list[Organization]:
 
 
 def save_orgs(orgs: list[Organization]) -> None:
-    ORGS_PATH.write_text(json.dumps([asdict(o) for o in orgs], ensure_ascii=False, indent=2), encoding="utf-8")
+    storage.save_json(ORGS_PATH, "orgs", [asdict(o) for o in orgs])
 
 
 _FLAT_TAIL = re.compile(r"[\s,;]+(?:кв|квартира|пом|помещение)\b\.?\s*[\w/\-.,\s]*$", re.IGNORECASE)
