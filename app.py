@@ -1869,8 +1869,8 @@ class CourtsEditorDialog(tk.Toplevel):
         top = ttk.Frame(self, padding=(12, 10, 12, 0))
         top.pack(fill="x")
         ttk.Label(top, text="Поиск:").pack(side="left")
-        self.parent_app = parent
-        self.query = tk.StringVar(value=getattr(parent.settings, "courts_query", ""))      # прошлый поиск запоминается
+        self.parent_app = getattr(parent, "app", parent)       # окно открывается из «Настроек», у которых главное окно в .app
+        self.query = tk.StringVar(value=self.parent_app.settings.courts_query)      # прошлый поиск запоминается
         self.query_entry = ttk.Entry(top, textvariable=self.query)
         self.query_entry.pack(side="left", fill="x", expand=True, padx=6)
         self.query.trace_add("write", lambda *a: self.refresh())

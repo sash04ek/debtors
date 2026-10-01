@@ -29,3 +29,25 @@ class TableColumnsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CourtsEditorTest(unittest.TestCase):
+    def test_opens_from_settings_and_remembers_query(self):
+        """Регрессия: из «Настроек» окно судей открывалось пустым (родитель — не главное окно)."""
+        old_save = app.save_settings
+        app.save_settings = lambda s: None
+        a = app.App()
+        try:
+            a.settings.courts_query = ""
+            dlg = app.SettingsDialog(a)
+            ed = app.CourtsEditorDialog(dlg)
+            ed.update()
+            self.assertEqual(len(ed.tree.get_children()), len(ed.shown))
+            ed.query.set("Таганрог")
+            ed.destroy()
+            self.assertEqual(a.settings.courts_query, "Таганрог")
+            dlg.destroy()
+        finally:
+            a.settings.courts_query = ""
+            a.destroy()
+            app.save_settings = old_save
