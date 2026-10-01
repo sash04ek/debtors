@@ -1316,7 +1316,7 @@ class App(tk.Tk):
             rows.append(row)
         self.show_rows(self.result.headers, rows, numbered=True)
         if sort_col and sort_col in self.result.headers:
-            self._mark_sort(f"c{self.result.headers.index(sort_col) + 2}", sort_desc)      # +2: колонки «✓» и «№»
+            self._mark_sort(f"c{self.result.headers.index(sort_col) + N_SERVICE}", sort_desc)      # перед данными — служебные колонки
         else:
             self._mark_sort("c1", False)
         state = "normal" if self.result.top else "disabled"
