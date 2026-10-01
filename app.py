@@ -497,6 +497,7 @@ class App(tk.Tk):
         self.top_n = tk.IntVar(value=self.settings.top_n)
         self.ip_as_person = tk.BooleanVar(value=self.settings.ip_as_person)
         self.skip_nonres = tk.BooleanVar(value=self.settings.skip_nonresidential)
+        self.only_managed = tk.BooleanVar(value=self.settings.only_managed)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
         self.font_var = tk.StringVar(value=FONT_LABELS.get(self.settings.table_font, FONT_LABELS["normal"]))
         self.theme_var = tk.StringVar(value=THEME_LABELS.get(self.settings.theme, THEME_LABELS["system"]))
@@ -1078,7 +1079,13 @@ class App(tk.Tk):
                     "пустой список домов означает «все дома файла»).")
             messagebox.showinfo("Пустой список", msg)
             return
-        parts = [f"{k}: {st[k]}" for k in ("не физлица", "нежилые помещения", "без долга / сумма не распознана") if st.get(k)]
+        if st.get("дома не в управлении", 0) and st["дома не в управлении"] >= total - st.get("дома других организаций", 0) > 0:
+            messagebox.showinfo("Пустой список", f"Включён отбор «Только дома в управлении», а все дома организации «{org.name}» из этого "
+                                "отчёта сейчас не в управлении: у них не указана дата «В управлении с» или дом уже выбыл "
+                                f"(строк отброшено: {st['дома не в управлении']}).\n\nУкажите даты в Настройки → Организации → Дома "
+                                "или выключите отбор в настройках.")
+            return
+        parts = [f"{k}: {st[k]}" for k in ("дома не в управлении", "не физлица", "нежилые помещения", "без долга / сумма не распознана") if st.get(k)]
         messagebox.showinfo("Пустой список", "Под условия отбора не подошла ни одна строка.\n\n"
                             + (("Пропущено: " + "; ".join(parts) + ".\n\n") if parts else "")
                             + "Проверьте колонки в настройках (ФИО, «Сумма долга», «Адрес дома», «Квартира») и галочки отбора.")
@@ -1479,6 +1486,7 @@ class App(tk.Tk):
         s.inn_col = s.type_col = None
         s.ip_as_person = self.ip_as_person.get()
         s.skip_nonresidential = self.skip_nonres.get()
+        s.only_managed = self.only_managed.get()
         s.restore_state = self.restore_var.get()
         s.table_font = next((k for k, v in FONT_LABELS.items() if v == self.font_var.get()), "normal")
         s.theme = next((k for k, v in THEME_LABELS.items() if v == self.theme_var.get()), "system")
@@ -1523,7 +1531,9 @@ class App(tk.Tk):
 
         st = self.result.stats
         self.stats_lbl.config(text=(
-            f"Организация: {self.current_org().name} · строк: {st['всего строк']} · физлиц с долгом: {st['физлиц с долгом']} · "
+            f"Организация: {self.current_org().name} · строк: {st['всего строк']} · "
+            + (f"не в управлении: {st['дома не в управлении']} · " if st.get("дома не в управлении") else "")
+            + f"физлиц с долгом: {st['физлиц с долгом']} · "
             f"отобрано: {st['отобрано']} · сумма: {fmt_money(st['сумма долга отобранных'])}"
         ))
         self.filter_btn.config(text="Сбросить фильтр")
@@ -1838,6 +1848,7 @@ class SettingsDialog(Dialog):
         ttk.Spinbox(rules.row("Показать должников"), from_=1, to=100000, textvariable=app.top_n, width=7).pack()
         widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
         widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
+        widgets.Switch(rules.row("Только дома в управлении"), app.only_managed).pack()
         widgets.Switch(rules.row("Запоминать состояние при запуске"), app.restore_var).pack()
         widgets.PopupSelect(rules.row("Сортировать по"), app.sort_var, app.sort_options).pack()
         widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()

@@ -54,6 +54,7 @@ class Settings:
     welcomed: bool = False              # приветствие первого запуска уже показано
     geometry: str = ""                  # размер и положение главного окна («980x700+120+60»)
     table_font: str = "normal"          # размер шрифта таблицы: normal / large / xlarge
+    only_managed: bool = False          # в отбор попадают только дома, которые сейчас в управлении (по дате в списке домов)
     theme: str = "system"               # оформление: system — как в системе, light — светлое, dark — тёмное
     org_markers: list[str] = field(default_factory=lambda: list(DEFAULT_ORG_MARKERS))
     markers_version: int = MARKERS_VERSION   # для дозаписи новых слов в сохранённый список
@@ -334,19 +335,25 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
     ti = idx.get(s.type_col) if s.type_col else None
 
     houses = None
+    managed = None                                        # дома в управлении сейчас; задаётся при «Только дома в управлении»
     if org is not None and getattr(org, "houses", None):
         if not s.addr_col:
             raise ValueError("У организации заданы дома — выберите колонку «Адрес».")
-        from orgs import norm_addr
+        from orgs import is_managed, norm_addr
         houses = {norm_addr(h["address"]) for h in org.houses}
+        if s.only_managed:
+            managed = {norm_addr(h["address"]) for h in org.houses if is_managed(h.get("since", ""))}
     ai = idx[s.addr_col] if s.addr_col else None
     addr_of = lambda r: row_address(r, idx, s.addr_col, s.house_col)
     fi = idx[s.flat_col] if (s.flat_col and s.skip_nonresidential) else None
 
-    persons, skipped_org, skipped_amount, other_org, nonres = [], 0, 0, 0, 0
+    persons, skipped_org, skipped_amount, other_org, nonres, not_managed = [], 0, 0, 0, 0, 0
     for r in sheet.rows:
         if houses is not None and norm_addr(addr_of(r)) not in houses:
             other_org += 1
+            continue
+        if managed is not None and norm_addr(addr_of(r)) not in managed:
+            not_managed += 1                              # дом из списка организации, но сейчас не в управлении
             continue
         flat = None
         if fi is not None:
@@ -382,6 +389,7 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
         stats={
             "всего строк": len(sheet.rows),
             "дома других организаций": other_org,
+            "дома не в управлении": not_managed,
             "нежилые помещения": nonres,
             "не физлица": skipped_org,
             "без долга / сумма не распознана": skipped_amount,

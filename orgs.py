@@ -201,6 +201,43 @@ def house_court(org: Organization, address: str) -> str:
     return ""
 
 
+_DATE_RE = re.compile(r"(\d{1,2})\.(\d{1,2})\.(\d{4}|\d{2})(?!\d)")
+_LEFT_WORDS = ("ушел", "ушёл", "ушла", "выбыл", "расторг", "не в управлении")
+
+
+def _dates_in(text: str) -> list:
+    from datetime import date
+    out = []
+    for d, m, y in _DATE_RE.findall(text):
+        y = int(y) + (2000 if len(y) == 2 else 0)
+        try:
+            out.append(date(y, int(m), int(d)))
+        except ValueError:
+            pass
+    return out
+
+
+def is_managed(since: str, today=None) -> bool:
+    """Находится ли дом в управлении сейчас, по полю «В управлении с».
+    Пусто — нет. Одна дата — с этой даты (дата в будущем — ещё нет). Две даты («01.12.2019г-01.11.2020гг») — период:
+    дом в управлении, пока сегодня внутри него. Слова «ушел», «выбыл», «расторг…» — дом больше не в управлении.
+    Непустой текст без распознаваемой даты считается заполненным, то есть дом в управлении."""
+    from datetime import date
+    text = (since or "").strip()
+    if not text:
+        return False
+    low = text.lower()
+    if any(w in low for w in _LEFT_WORDS):
+        return False
+    dates = _dates_in(text)
+    today = today or date.today()
+    if not dates:
+        return True
+    if len(dates) == 1:
+        return dates[0] <= today
+    return min(dates) <= today <= max(dates)
+
+
 def house_since(org: Organization, address: str) -> str:
     """Дата, с которой дом находится в управлении организации (пусто, если дома нет в списке или дата не задана)."""
     a = norm_addr(address)
