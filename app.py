@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+import subprocess
 import sys
 import tkinter as tk
 import tkinter.font as tkfont
@@ -448,12 +450,8 @@ class App(tk.Tk):
         docs = ttk.Frame(self)
         docs.pack(fill="x", padx=6, pady=(0, 4))
         ttk.Label(docs, text="Документы для отмеченных:").pack(side="left", padx=(0, 6))
-        self.claim_btn = ttk.Button(docs, text="Претензии…", command=self.make_claims, state="disabled")
-        self.claim_btn.pack(side="left")
-        self.letter_btn = ttk.Button(docs, text="Письмо в ЕИРЦ…", command=self.make_letter, state="disabled")
-        self.letter_btn.pack(side="left", padx=6)
-        self.court_btn = ttk.Button(docs, text="Судебный приказ…", command=self.make_court, state="disabled")
-        self.court_btn.pack(side="left")
+        self.docs_btn = ttk.Button(docs, text="Создать документы ▾", command=self.show_docs_menu, state="disabled")
+        self.docs_btn.pack(side="left")
         self.owner_btn = ttk.Button(docs, text="Собственники помещения…", command=self.edit_owner, state="disabled")
         self.owner_btn.pack(side="right")
 
@@ -801,9 +799,7 @@ class App(tk.Tk):
         self.filter_btn.config(text="Фильтровать")
         self.result = None
         self.export_btn.config(state="disabled")
-        self.claim_btn.config(state="disabled")
-        self.letter_btn.config(state="disabled")
-        self.court_btn.config(state="disabled")
+        self.docs_btn.config(state="disabled")
         self.owner_btn.config(state="disabled")
         org = orgmod.find_by_title(self.orgs, self.sheet.title)
         if org:
@@ -959,36 +955,218 @@ class App(tk.Tk):
     def edit_orgs(self):
         OrgDialog(self, self.orgs, self.org_cb.get(), on_close=lambda name: self.refresh_orgs(name))
 
+    # ---------- создание документов ----------
+    DOC_KINDS = {
+        "claims": "Претензии",
+        "letter": "Письмо в ЕИРЦ",
+        "court": "Заявления о судебном приказе",
+    }
+
     def make_claims(self):
+        self.create_docs("claims")
+
+    def make_letter(self):
+        self.create_docs("letter")
+
+    def make_court(self):
+        self.create_docs("court")
+
+    def court_jobs(self, pick: list[int]) -> list[dict]:
+        """По каждому отмеченному адресу: карточка и список дел (по одному на каждого собственника)."""
+        jobs = []
+        for k in pick:
+            info = self.row_info(k)
+            card = owners.get_card(info["address"], info["flat"]) or owners.get_or_new(info["address"], info["flat"])
+            jobs.append({"k": k, "info": info, "card": card,
+                         "cases": court.plan_cases(card, info["report_fio"], info["debt"])})
+        return jobs
+
+    def show_docs_menu(self):
+        """Меню кнопки «Создать документы»: у каждого пункта — сколько документов получится."""
+        pick = self.checked_indexes()
+        n = len(pick)
+        menu = tk.Menu(self, tearoff=0)
+        try:
+            n_court = sum(len(j["cases"]) for j in self.court_jobs(pick)) if (n and self.settings.addr_col
+                                                                              and self.settings.flat_col) else 0
+        except Exception:
+            n_court = n
+        menu.add_command(label=f"Претензии — {n}", command=self.make_claims)
+        menu.add_command(label=f"Письмо в ЕИРЦ — 1 письмо, адресов: {n}", command=self.make_letter)
+        menu.add_command(label=f"Заявления о судебном приказе — {n_court}", command=self.make_court)
+        if not n:
+            for i in range(3):
+                menu.entryconfig(i, state="disabled")
+        b = self.docs_btn
+        menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+
+    def check_problems(self, kind: str, pick: list[int]) -> tuple[str, list[tuple]]:
+        """Что может оказаться незаполненным в документах: (краткая сводка, [(адрес, кв., проблема)])."""
+        if kind != "court":
+            return "", []
+        rows, no_data, no_court = [], 0, 0
+        for k in pick:
+            miss = []
+            if not self.card_flags[k]:
+                no_data += 1
+                miss.append("нет персональных данных")
+            if not self.court_flags[k]:
+                no_court += 1
+                miss.append("нет участка")
+            if miss:
+                info = self.row_info(k)
+                rows.append((info["address"], info["flat"], ", ".join(miss)))
+        parts = []
+        if no_data:
+            parts.append(f"у {no_data} из {len(pick)} нет персональных данных")
+        if no_court:
+            parts.append(f"у {no_court} нет участка")
+        return (", ".join(parts).capitalize() if parts else ""), rows
+
+    def start_progress(self, title: str, total: int):
+        return ProgressWindow(self, title, total) if total >= 3 else NoProgress()
+
+    def finish_docs(self, title: str, text: str, folder: Path):
+        """Итог создания; предлагает открыть папку с документами."""
+        if messagebox.askyesno(title, f"{text}\n\nОткрыть папку?"):
+            open_folder(folder)
+
+    def create_docs(self, kind: str):
         if not self.result or not self.result.top:
             return
         s, org = self.settings, self.current_org()
-        h = self.result.headers
+        title = self.DOC_KINDS[kind]
         if not (s.addr_col and s.flat_col):
-            messagebox.showinfo("Нет колонок", "Для претензий выберите колонки «Адрес дома» и «Квартира».")
+            messagebox.showinfo("Нет колонок", f"Для документов выберите колонки «Адрес дома» и «Квартира» в настройках.")
+            return
+        if kind == "letter" and not org.letter_header.strip():
+            messagebox.showinfo("Нет шапки", "Заполните вкладку «Письмо в ЕИРЦ» в настройках → «Организации…».")
             return
         pick = self.checked_indexes()
         if not pick:
-            messagebox.showinfo("Претензии", "Не отмечено ни одного адреса.")
+            messagebox.showinfo(title, "Не отмечено ни одного адреса.")
             return
-        folder = filedialog.askdirectory(title=f"Папка для претензий ({org.name})")
-        if not folder:
+        jobs = self.court_jobs(pick) if kind == "court" else None
+        if kind == "claims":
+            count = f"Претензий: {len(pick)}"
+        elif kind == "letter":
+            count = f"Одно письмо, адресов в нём: {len(pick)}"
+        else:
+            count = f"Заявлений: {sum(len(j['cases']) for j in jobs)} (адресов: {len(pick)})"
+        summary, rows = self.check_problems(kind, pick)
+        dlg = DocsDialog(self, title, org.name, count, summary, rows, Path(s.out_dir) if s.out_dir else DEFAULT_OUT_DIR)
+        self.wait_window(dlg)
+        if not dlg.ok:
             return
+        out = dlg.folder
+        try:
+            out.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            messagebox.showerror("Ошибка", f"Не удалось создать папку:\n{out}\n{e}")
+            return
+        s.out_dir = str(out)
+        self.save_settings_now()
+        {"claims": self._gen_claims, "letter": self._gen_letter, "court": self._gen_court}[kind](org, pick, out, jobs)
+
+    def _gen_claims(self, org, pick, out: Path, _jobs):
+        s, h = self.settings, self.result.headers
         fi, ni = h.index(s.flat_col), h.index(s.name_col)
         today, made = date.today(), 0
-        out = Path(folder)
+        prog = self.start_progress("Претензии", len(pick))
         try:
-            for k in pick:
+            for n, k in enumerate(pick, 1):
+                if prog.cancelled:
+                    break
                 row = self.result.top[k]
                 addr, flat = orgmod.addr_flat(self.row_addr(row), row[fi])
                 fn = f"{k + 1:02d} " + claim.file_name(row[ni], addr, flat)
                 claim.build_claim(org, address=addr, flat=flat, debt=self.result.amounts[k],
                                   on_date=today, path=out / fn)
                 made += 1
+                prog.step(n, fn)
         except Exception as e:
+            prog.close()
             messagebox.showerror("Ошибка", f"Сформировано {made}, затем ошибка:\n{e}")
             return
-        messagebox.showinfo("Готово", f"Претензий: {made}\nОрганизация: {org.name}\nПапка: {folder}")
+        prog.close()
+        stopped = "\n(прервано пользователем)" if prog.cancelled else ""
+        self.finish_docs("Готово", f"Претензий: {made}{stopped}\nОрганизация: {org.name}\nПапка: {out}", out)
+
+    def _gen_letter(self, org, pick, out: Path, _jobs):
+        s, h = self.settings, self.result.headers
+        fi = h.index(s.flat_col)
+        name = f"Письмо в ЕИРЦ {org.name}.docx".replace("«", "").replace("»", "").replace('"', "")
+        path = out / name
+        try:
+            n = claim.build_letter(org, items=[orgmod.addr_flat(self.row_addr(self.result.top[k]), self.result.top[k][fi])
+                                               for k in pick],
+                                   on_date=date.today(), path=path)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сформировать письмо:\n{e}")
+            return
+        self.finish_docs("Готово", f"Адресов в письме: {n}\nОрганизация: {org.name}\n{path}", out)
+
+    def _gen_court(self, org, pick, out: Path, jobs):
+        data = courtsmod.load()
+        courts_list, batch_code = data["courts"], ""
+        lacking = sum(1 for j in jobs if not orgmod.house_court(org, j["info"]["address"]))
+        if courts_list and lacking:
+            dlg = CourtChoiceDialog(self, courts_list, data["last"], lacking, len(pick))
+            self.wait_window(dlg)
+            if dlg.result is None:
+                return
+            batch_code = dlg.result
+            if batch_code:
+                courtsmod.save_last(batch_code)
+        elif not courts_list:
+            messagebox.showinfo("Судебные участки", "Список участков не загружен: в заявлениях поле суда останется пустым. "
+                                "Загрузить список можно в настройках (шестерёнка → «Судебные участки»).")
+        total = sum(len(j["cases"]) for j in jobs)
+        n_known = n_unknown = no_card = no_court = multi = done = 0
+        prog = self.start_progress("Заявления о судебном приказе", total)
+        try:
+            for job in jobs:
+                if prog.cancelled:
+                    break
+                k, info, card, cases = job["k"], job["info"], job["card"], job["cases"]
+                if not self.card_flags[k] and owners.get_card(info["address"], info["flat"]) is None:
+                    no_card += 1
+                court_obj = (courtsmod.find_by_code(courts_list, orgmod.house_court(org, info["address"]))
+                             or courtsmod.find_by_code(courts_list, batch_code))
+                if len(cases) > 1:
+                    multi += 1
+                for j, case in enumerate(cases, 1):
+                    if prog.cancelled:
+                        break
+                    who = case.owner.fio if case.owner else "собственник не известен"
+                    num = f"{k + 1:02d}" + (f"-{j}" if len(cases) > 1 else "")
+                    fn = f"{num} " + claim.safe_name(
+                        f"Заявление о судебном приказе {who} {info['address']} кв {claim.clean_flat(info['flat'])}") + ".docx"
+                    no_court += 0 if court_obj else 1
+                    if court.build_court_application(org, card, case, path=out / fn, court_obj=court_obj):
+                        n_known += 1
+                    else:
+                        n_unknown += 1
+                    done += 1
+                    prog.step(done, fn)
+        except Exception as e:
+            prog.close()
+            messagebox.showerror("Ошибка", f"Не удалось сформировать заявление:\n{e}")
+            return
+        prog.close()
+        note = (f"\n\nДля {no_card} адресов карточка собственника не заполнена: ФИО взято из отчёта, а дата и место "
+                "рождения, паспорт, пени, периоды остались пустыми (____). Заполните их в «Данные собственника…» "
+                "или в Word.") if no_card else ""
+        if multi:
+            note += (f"\n\nПомещений с несколькими собственниками: {multi} — на каждого собственника сформировано "
+                     "отдельное заявление (номера вида 05-1, 05-2).")
+        if no_court:
+            note += f"\n\nБез судебного участка (поле суда пустое): {no_court}."
+        if prog.cancelled:
+            note += "\n\nСоздание прервано пользователем."
+        self.finish_docs("Готово", f"Заявлений: {n_known + n_unknown}\n"
+                                   f"• с ФИО собственника: {n_known}\n• собственник неизвестен: {n_unknown}\n"
+                                   f"Организация: {org.name}\nПапка: {out}{note}", out)
 
     # ---------- отметки в таблице результата ----------
     def checked_indexes(self) -> list[int]:
@@ -1013,6 +1191,8 @@ class App(tk.Tk):
             if self.result and len(self.result.amounts) == total:
                 text += f" · долг отмеченных: {fmt_money(sum(a for a, on in zip(self.result.amounts, self.check_state) if on))}"
         self.pick_lbl.config(text=text)
+        if hasattr(self, "docs_btn"):
+            self.docs_btn.config(text=f"Создать документы ({n}) ▾" if (self.has_checks and n) else "Создать документы ▾")
         self.save_state()
 
     def toggle_all(self):
@@ -1061,40 +1241,10 @@ class App(tk.Tk):
         self.result = None
         self.show_rows(self.sheet.headers, self.sheet.rows)
         self.stats_lbl.config(text=f"Загружено строк: {len(self.sheet.rows)}")
-        for b in (self.export_btn, self.claim_btn, self.letter_btn, self.court_btn, self.owner_btn):
+        for b in (self.export_btn, self.docs_btn, self.owner_btn):
             b.config(state="disabled")
         self.filter_btn.config(text="Фильтровать")
         self.save_state()
-
-    def make_letter(self):
-        if not self.result or not self.result.top:
-            return
-        s, org = self.settings, self.current_org()
-        if not (s.addr_col and s.flat_col):
-            messagebox.showinfo("Нет колонок", "Для письма выберите колонки «Адрес дома» и «Квартира».")
-            return
-        if not org.letter_header.strip():
-            messagebox.showinfo("Нет шапки", "Заполните вкладку «Письмо в ЕИРЦ» в настройках → «Организации…».")
-            return
-        pick = self.checked_indexes()
-        if not pick:
-            messagebox.showinfo("Письмо в ЕИРЦ", "Не отмечено ни одного адреса.")
-            return
-        h = self.result.headers
-        fi = h.index(s.flat_col)
-        default = f"Письмо в ЕИРЦ {org.name}.docx".replace("«", "").replace("»", "").replace('"', "")
-        p = filedialog.asksaveasfilename(defaultextension=".docx", initialfile=default,
-                                         filetypes=[("Word", "*.docx")])
-        if not p:
-            return
-        try:
-            n = claim.build_letter(org, items=[orgmod.addr_flat(self.row_addr(self.result.top[k]), self.result.top[k][fi])
-                                               for k in pick],
-                                   on_date=date.today(), path=p)
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось сформировать письмо:\n{e}")
-            return
-        messagebox.showinfo("Готово", f"Адресов в письме: {n}\nОрганизация: {org.name}\n{p}")
 
     # ---------- собственники и судебный приказ ----------
     def row_addr(self, row: list) -> str:
@@ -1139,79 +1289,6 @@ class App(tk.Tk):
         if item and self._need_addr_cols("карточки собственника"):
             OwnerDialog(self, self.row_info(self.item_index[item]), self.current_org())
             return "break"
-
-    def make_court(self):
-        if not self.result or not self.result.top or not self._need_addr_cols("заявления"):
-            return
-        org = self.current_org()
-        pick = self.checked_indexes()
-        if not pick:
-            messagebox.showinfo("Судебный приказ", "Не отмечено ни одного адреса.")
-            return
-        data = courtsmod.load()
-        courts_list, batch_code = data["courts"], ""
-
-        def own_court_code(info: dict, card) -> str:
-            """Участок, уже известный для помещения: закреплён за домом в списке домов организации."""
-            return orgmod.house_court(org, info["address"])
-        lacking = 0
-        for k in pick:
-            info = self.row_info(k)
-            if not own_court_code(info, owners.get_card(info["address"], info["flat"])):
-                lacking += 1
-        if courts_list and lacking:
-            dlg = CourtChoiceDialog(self, courts_list, data["last"], lacking, len(pick))
-            self.wait_window(dlg)
-            if dlg.result is None:
-                return
-            batch_code = dlg.result
-            if batch_code:
-                courtsmod.save_last(batch_code)
-        elif courts_list:
-            pass                                         # у всех адресов участок уже задан — общий выбор не нужен
-        else:
-            messagebox.showinfo("Судебные участки", "Список участков не загружен: в заявлениях поле суда останется пустым. "
-                                "Загрузить список можно в настройках (шестерёнка → «Судебные участки»).")
-        folder = filedialog.askdirectory(title=f"Папка для заявлений ({org.name})")
-        if not folder:
-            return
-        out, n_known, n_unknown, no_card, no_court, multi = Path(folder), 0, 0, 0, 0, 0
-        try:
-            for k in pick:
-                info = self.row_info(k)
-                card = owners.get_card(info["address"], info["flat"])
-                if card is None:
-                    no_card += 1
-                    card = owners.get_or_new(info["address"], info["flat"])
-                court_obj = (courtsmod.find_by_code(courts_list, orgmod.house_court(org, info["address"]))
-                             or courtsmod.find_by_code(courts_list, batch_code))
-                cases = court.plan_cases(card, info["report_fio"], info["debt"])     # по одному на каждого собственника
-                if len(cases) > 1:
-                    multi += 1
-                for j, case in enumerate(cases, 1):
-                    who = case.owner.fio if case.owner else "собственник не известен"
-                    num = f"{k + 1:02d}" + (f"-{j}" if len(cases) > 1 else "")
-                    fn = f"{num} " + claim.safe_name(
-                        f"Заявление о судебном приказе {who} {info['address']} кв {claim.clean_flat(info['flat'])}") + ".docx"
-                    no_court += 0 if court_obj else 1
-                    if court.build_court_application(org, card, case, path=out / fn, court_obj=court_obj):
-                        n_known += 1
-                    else:
-                        n_unknown += 1
-        except Exception as e:
-            messagebox.showerror("Ошибка", f"Не удалось сформировать заявление:\n{e}")
-            return
-        note = (f"\n\nДля {no_card} адресов карточка собственника не заполнена: ФИО взято из отчёта, а дата и место "
-                "рождения, паспорт, пени, периоды остались пустыми (____). Заполните их в «Данные собственника…» "
-                "или в Word.") if no_card else ""
-        if multi:
-            note += (f"\n\nПомещений с несколькими собственниками: {multi} — на каждого собственника сформировано "
-                     "отдельное заявление (номера вида 05-1, 05-2).")
-        if no_court:
-            note += f"\n\nБез судебного участка (поле суда пустое): {no_court}."
-        messagebox.showinfo("Готово", f"Заявлений: {n_known + n_unknown}\n"
-                                      f"• с ФИО собственника: {n_known}\n• собственник неизвестен: {n_unknown}\n"
-                                      f"Организация: {org.name}\nПапка: {folder}{note}")
 
     def edit_markers(self):
         win = tk.Toplevel(self)
@@ -1319,7 +1396,7 @@ class App(tk.Tk):
         else:
             self._mark_sort("c1", False)
         state = "normal" if self.result.top else "disabled"
-        for b in (self.export_btn, self.claim_btn, self.letter_btn, self.court_btn, self.owner_btn):
+        for b in (self.export_btn, self.docs_btn, self.owner_btn):
             b.config(state=state)
 
     def export(self):
@@ -2038,6 +2115,120 @@ class CourtPicker(ttk.Frame):
         self.code = ""
         self.combo.set_text("")
         self._show_info()
+
+
+DEFAULT_OUT_DIR = Path.home() / "Documents" / "Должники"      # куда складываются документы, пока папка не выбрана
+
+
+def open_folder(path: Path) -> None:
+    """Открывает папку в Finder / Проводнике."""
+    try:
+        if sys.platform == "darwin":
+            subprocess.Popen(["open", str(path)])
+        elif sys.platform.startswith("win"):
+            os.startfile(str(path))                         # type: ignore[attr-defined]
+        else:
+            subprocess.Popen(["xdg-open", str(path)])
+    except Exception:
+        pass
+
+
+class NoProgress:
+    """Для небольшого числа документов окно прогресса не нужно."""
+    cancelled = False
+
+    def step(self, n: int, text: str = "") -> None:
+        pass
+
+    def close(self) -> None:
+        pass
+
+
+class ProgressWindow(tk.Toplevel):
+    """Индикатор выполнения при создании большого числа документов; можно прервать."""
+
+    def __init__(self, app: "App", title: str, total: int):
+        super().__init__(app)
+        self.title(title)
+        self.transient(app)
+        self.resizable(False, False)
+        self.total, self.cancelled = total, False
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        self.lbl = ttk.Label(body, text=f"0 из {total}", width=60)
+        self.lbl.pack(anchor="w")
+        self.bar = ttk.Progressbar(body, maximum=total, length=420)
+        self.bar.pack(fill="x", pady=8)
+        ttk.Button(body, text="Прервать", command=self.cancel).pack(anchor="e")
+        self.protocol("WM_DELETE_WINDOW", self.cancel)
+        center_over(self, app)
+        self.update()
+
+    def cancel(self):
+        self.cancelled = True
+        self.lbl.config(text="Прерываю после текущего документа…")
+
+    def step(self, n: int, text: str = "") -> None:
+        self.bar["value"] = n
+        short = text if len(text) < 58 else text[:55] + "…"
+        self.lbl.config(text=f"{n} из {self.total}: {short}")
+        self.update()
+
+    def close(self) -> None:
+        self.destroy()
+
+
+class DocsDialog(tk.Toplevel):
+    """Подтверждение перед созданием документов: сколько будет создано, что не заполнено и в какую папку сохранить."""
+
+    def __init__(self, app: "App", title: str, org_name: str, count: str, summary: str, rows: list[tuple], folder: Path):
+        super().__init__(app)
+        self.title(title)
+        self.transient(app)
+        self.ok, self.folder = False, folder
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text=title, font=("", 14, "bold")).pack(anchor="w")
+        ttk.Label(body, text=f"{count}\nОрганизация: {org_name}", justify="left").pack(anchor="w", pady=(4, 8))
+        if rows:
+            ttk.Label(body, text=summary + ". Документы всё равно будут созданы, недостающие поля останутся пустыми (____).",
+                      style="Warn.TLabel", wraplength=640, justify="left").pack(anchor="w")
+            box = ttk.Frame(body)
+            box.pack(fill="both", expand=True, pady=(4, 8))
+            tree = ttk.Treeview(box, columns=("addr", "flat", "what"), show="headings", height=min(8, len(rows)))
+            for c, text, w in (("addr", "Адрес", 240), ("flat", "Кв.", 60), ("what", "Чего не хватает", 320)):
+                tree.heading(c, text=text)
+                tree.column(c, width=w, stretch=c == "what")
+            for r in rows:
+                tree.insert("", "end", values=r)
+            sb = ttk.Scrollbar(box, orient="vertical", command=tree.yview)
+            tree.configure(yscrollcommand=sb.set)
+            tree.pack(side="left", fill="both", expand=True)
+            sb.pack(side="left", fill="y")
+        frow = ttk.Frame(body)
+        frow.pack(fill="x", pady=(4, 0))
+        ttk.Label(frow, text="Папка:").pack(side="left")
+        self.folder_lbl = ttk.Label(frow, text=str(folder), wraplength=470, justify="left")
+        self.folder_lbl.pack(side="left", padx=6, fill="x", expand=True)
+        ttk.Button(frow, text="Изменить…", command=self.choose).pack(side="right")
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(12, 0))
+        ttk.Button(btns, text="Создать", command=self.accept).pack(side="right")
+        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.bind("<Return>", lambda e: self.accept())
+        center_over(self, app)
+        self.grab_set()
+
+    def choose(self):
+        p = filedialog.askdirectory(parent=self, title="Папка для документов", initialdir=str(self.folder.parent if not self.folder.exists() else self.folder))
+        if p:
+            self.folder = Path(p)
+            self.folder_lbl.config(text=p)
+
+    def accept(self):
+        self.ok = True
+        self.destroy()
 
 
 class CourtChoiceDialog(tk.Toplevel):
