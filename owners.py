@@ -89,19 +89,12 @@ def make_key(address, flat) -> str:
 
 
 def _load_all() -> dict[str, dict]:
-    try:
-        data = json.loads(OWNERS_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    data = storage.load_json(OWNERS_PATH, "owners", {})
+    return data if isinstance(data, dict) else {}
 
 
 def _save_all(data: dict[str, dict]) -> None:
-    OWNERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        os.chmod(OWNERS_PATH, 0o600)  # персональные данные — только владельцу
-    except OSError:
-        pass
+    storage.save_json(OWNERS_PATH, "owners", data, private=True)      # персональные данные — только владельцу, права 600
 
 
 _LEGACY_OWNER_KEYS = ("fio", "fio_gen", "fio_ins", "birth_date", "birth_place", "passport", "reg_address", "live_address")
@@ -147,19 +140,12 @@ TRASH_DAYS = 30                                   # сколько дней уд
 
 
 def _load_trash() -> dict[str, dict]:
-    try:
-        data = json.loads(TRASH_PATH.read_text(encoding="utf-8"))
-        return data if isinstance(data, dict) else {}
-    except Exception:
-        return {}
+    data = storage.load_json(TRASH_PATH, "trash", {})
+    return data if isinstance(data, dict) else {}
 
 
 def _save_trash(data: dict[str, dict]) -> None:
-    TRASH_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        os.chmod(TRASH_PATH, 0o600)
-    except OSError:
-        pass
+    storage.save_json(TRASH_PATH, "trash", data, private=True)
 
 
 def delete_card(address, flat) -> None:

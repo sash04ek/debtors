@@ -38,7 +38,9 @@ STARTUP_FILE_EXT = (".xls", ".xlsx", ".xlsm")
 
 def load_settings() -> core.Settings:
     try:
-        data = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+        data = storage.load_json(CONFIG_PATH, "settings")
+        if not isinstance(data, dict):
+            return core.Settings()
         s = core.Settings(**{k: v for k, v in data.items() if k in core.Settings.__dataclass_fields__})
         if data.get("markers_version", 1) < core.MARKERS_VERSION:
             have = {m.lower() for m in s.org_markers}
@@ -51,7 +53,7 @@ def load_settings() -> core.Settings:
 
 def save_settings(s: core.Settings) -> None:
     try:
-        CONFIG_PATH.write_text(json.dumps(asdict(s), ensure_ascii=False, indent=2), encoding="utf-8")
+        storage.save_json(CONFIG_PATH, "settings", asdict(s))
     except OSError:
         pass
 
@@ -946,9 +948,9 @@ class App(tk.Tk):
             unchecked = []
             if self.result and self.has_checks:
                 unchecked = [self._state_key(i) for i, on in enumerate(self.check_state) if not on]
-            STATE_PATH.write_text(json.dumps({
+            storage.save_json(STATE_PATH, "state", {
                 "file": str(self.path) if self.path else "", "sheet": self.sheet_cb.get(), "org": self.org_cb.get(),
-                "filtered": bool(self.result), "unchecked": unchecked}, ensure_ascii=False, indent=2), encoding="utf-8")
+                "filtered": bool(self.result), "unchecked": unchecked})
         except Exception:
             pass
 
@@ -959,9 +961,8 @@ class App(tk.Tk):
             return
         if not self.settings.restore_state:
             return
-        try:
-            st = json.loads(STATE_PATH.read_text(encoding="utf-8"))
-        except Exception:
+        st = storage.load_json(STATE_PATH, "state")
+        if not isinstance(st, dict):
             return
         path = st.get("file") or ""
         if not path:
