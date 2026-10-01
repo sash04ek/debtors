@@ -26,6 +26,13 @@ def palette(root: tk.Misc) -> dict:
     except tk.TclError:
         pal = {"bg": "#ececec", "fg": "#000000", "card": "#f5f5f5", "line": "#d0d0d0", "muted": "#808080",
                "chip": "#e0e0e0", "off": "#b0b0b0"}
+    field = "systemTextBackgroundColor" if root.tk.call("tk", "windowingsystem") == "aqua" else (
+        st.lookup("Treeview", "fieldbackground") or "white")
+    try:
+        root.nametowidget(".").winfo_rgb(field)
+        pal["field"] = field
+    except tk.TclError:
+        pal["field"] = pal["bg"]
     try:
         root.winfo_rgb("systemControlAccentColor")
         pal["accent"] = "systemControlAccentColor"
@@ -142,6 +149,43 @@ def section(parent: tk.Misc, title: str, pady: tuple = (14, 0)) -> Card:
     return card
 
 
+class Badge(tk.Canvas):
+    """Круглый значок с номером шага."""
+
+    def __init__(self, parent, number: int, surface: str = "field", size: int = 26):
+        super().__init__(parent, width=size, height=size, highlightthickness=0, bd=0)
+        self.number, self.size, self.surface, self.role = number, size, surface, "badge"
+        self.redraw(palette(self))
+
+    def redraw(self, pal: dict):
+        s = self.size
+        self.configure(bg=pal["field"] if self.surface == "field" else pal["bg"])
+        self.delete("all")
+        self.create_oval(1, 1, s - 1, s - 1, fill=pal["accent"], outline=pal["accent"])
+        self.create_text(s / 2, s / 2 + 0.5, text=str(self.number), fill="#ffffff", font=("", 12, "bold"))
+
+
+def steps_list(parent: tk.Misc, steps, surface: str = "field", wrap: int = 470) -> tk.Frame:
+    """Нумерованный список шагов: значок с номером, жирное название и пояснение под ним."""
+    box = tk.Frame(parent, bd=0)
+    box.role = surface
+    for i, (title, detail) in enumerate(steps, 1):
+        row = tk.Frame(box, bd=0)
+        row.role = surface
+        row.pack(fill="x", pady=5)
+        Badge(row, i, surface).pack(side="left", anchor="n", padx=(0, 12))
+        col = tk.Frame(row, bd=0)
+        col.role = surface
+        col.pack(side="left", fill="x")
+        t = tk.Label(col, text=title, bd=0, anchor="w", font=("", 12, "bold"), justify="left")
+        t.role = f"{surface}-label"
+        t.pack(anchor="w")
+        d = tk.Label(col, text=detail, bd=0, anchor="w", justify="left", wraplength=wrap)
+        d.role = f"{surface}-muted"
+        d.pack(anchor="w")
+    return box
+
+
 def retheme(widget: tk.Misc) -> None:
     """Перекрашивает все элементы этого модуля внутри widget по текущей теме."""
     pal = palette(widget)
@@ -157,7 +201,13 @@ def retheme(widget: tk.Misc) -> None:
                 w.configure(bg=pal["card"], fg=pal["fg"])
             elif role == "muted":
                 w.configure(bg=pal["card"], fg=pal["muted"])
-            elif role in ("switch", "select"):
+            elif role in ("field", "window"):
+                w.configure(bg=pal["field"] if role == "field" else pal["bg"])
+            elif role in ("field-label", "window-label"):
+                w.configure(bg=pal["field" if role.startswith("field") else "bg"], fg=pal["fg"])
+            elif role in ("field-muted", "window-muted"):
+                w.configure(bg=pal["field" if role.startswith("field") else "bg"], fg=pal["muted"])
+            elif role in ("switch", "select", "badge"):
                 w.redraw(pal)
         except tk.TclError:
             pass

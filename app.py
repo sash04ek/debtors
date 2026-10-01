@@ -358,6 +358,9 @@ def apply_palette(root: tk.Misc) -> None:
     st.configure("Warn.TLabel", foreground="#f0a93c" if dark else "#b26a00")
     st.configure("Status.TLabel", foreground=muted, font="TkSmallCaptionFont")
     root.stripe_color = stripe
+    panel = getattr(root, "hint_panel", None)
+    if panel is not None:
+        widgets.retheme(panel)
     tree = getattr(root, "tree", None)
     if tree is not None:
         tree.tag_configure("odd", background=stripe)              # чередование строк, как в Finder
@@ -523,10 +526,17 @@ class App(tk.Tk):
         table = ttk.Frame(self)
         table.pack(fill="both", expand=True, **pad)
         self.table_frame = table
-        self.hint_panel = ttk.Frame(table)
-        ttk.Label(self.hint_panel, text="Что делать дальше", font=("", 15, "bold")).pack(anchor="w")
-        for step in NEXT_STEPS:
-            ttk.Label(self.hint_panel, text=step, style="Muted.TLabel", justify="left", wraplength=560).pack(anchor="w", pady=(5, 0))
+        self.hint_panel = tk.Frame(table, bd=0)                  # пустое состояние: закрывает таблицу, пока данных нет
+        self.hint_panel.role = "field"
+        inner = tk.Frame(self.hint_panel, bd=0)
+        inner.role = "field"
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+        head = tk.Label(inner, text="Что делать дальше", bd=0, font=("", 18, "bold"))
+        head.role = "field-label"
+        head.pack()
+        head.pack_configure(pady=(0, 8))
+        widgets.steps_list(inner, NEXT_STEPS).pack()
+        widgets.retheme(self.hint_panel)
         self.tree = ttk.Treeview(table, show="headings")
         ys = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(table, orient="horizontal", command=self.tree.xview)
@@ -973,7 +983,7 @@ class App(tk.Tk):
     def update_hint(self):
         empty = not self.data_rows
         if empty:
-            self.hint_panel.place(in_=self.table_frame, relx=0.5, rely=0.42, anchor="center")
+            self.hint_panel.place(in_=self.table_frame, x=0, y=0, relwidth=1, relheight=1)
             self.hint_panel.lift()
         else:
             self.hint_panel.place_forget()
@@ -1723,11 +1733,11 @@ class App(tk.Tk):
 
 
 NEXT_STEPS = (
-    "1. Откройте Excel-файл отчёта: кнопка «Открыть Excel…» (⌘O / Ctrl+O) или перетащите файл на значок программы.",
-    "2. Проверьте организацию и колонки: шестерёнка → «Настройки» и «Организации…» (дома, шапки, участки).",
-    "3. Нажмите «Фильтровать»: останутся физлица с наибольшим долгом.",
-    "4. Заполните данные собственников: двойной клик по строке. Галка в колонке «Данные» — карточка есть.",
-    "5. «Создать документы»: претензии, письмо в ЕИРЦ, заявления о судебном приказе.",
+    ("Откройте файл отчёта", "Кнопка «Открыть Excel…» (⌘O / Ctrl+O) или перетащите файл на значок программы."),
+    ("Проверьте организацию и колонки", "Шестерёнка → «Настройки» и «Организации» (дома, шапки, участки)."),
+    ("Нажмите «Фильтровать»", "Останутся физлица с наибольшим долгом."),
+    ("Заполните данные собственников", "Двойной клик по строке. Галка в колонке «Данные» — карточка заполнена."),
+    ("Создайте документы", "Претензии, письмо в ЕИРЦ и заявления о судебном приказе."),
 )
 
 SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70}      # служебные колонки таблицы результата и их ширина
@@ -2288,8 +2298,8 @@ class WelcomeDialog(tk.Toplevel):
         ttk.Label(body, text="Должники", font=("", 18, "bold")).pack(anchor="w")
         ttk.Label(body, text="Поиск должников по отчёту ЕИРЦ и формирование документов для их взыскания.",
                   wraplength=560, justify="left").pack(anchor="w", pady=(2, 10))
-        for step in NEXT_STEPS:
-            ttk.Label(body, text=step, wraplength=560, justify="left").pack(anchor="w", pady=2)
+        widgets.steps_list(body, NEXT_STEPS, surface="window", wrap=480).pack(anchor="w")
+        widgets.retheme(body)
         ttk.Label(body, text="Все данные хранятся только на этом компьютере, в папке ~/.debtors.",
                   style="Muted.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(10, 0))
         btns = ttk.Frame(body)
