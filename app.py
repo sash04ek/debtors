@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 import tkinter as tk
@@ -27,6 +28,10 @@ NONE = "— нет —"
 SORT_DEBT_LABEL = "Сумма долга"
 DESC_LABEL = "по убыванию (от большего к меньшему)"
 ASC_LABEL = "по возрастанию (от меньшего к большему)"
+
+
+FIRST_RUN = not CONFIG_PATH.exists()          # файла настроек ещё нет — программа запущена впервые
+STARTUP_FILE_EXT = (".xls", ".xlsx", ".xlsm")
 
 
 def load_settings() -> core.Settings:
@@ -274,6 +279,7 @@ def _mix(root: tk.Misc, fg: str, bg: str, k: float) -> str:
     return "#%02x%02x%02x" % tuple(int((a + (b - a) * k) / 257) for a, b in ((r1, r2), (g1, g2), (b1, b2)))
 
 
+FONT_LABELS = {"normal": "Обычный", "large": "Крупный", "xlarge": "Очень крупный"}
 THEME_LABELS = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}
 DARK_COLORS = {"bg": "#2b2b2b", "fg": "#e6e6e6", "field": "#1e1e1e", "select": "#0a5cc7"}
 
@@ -371,6 +377,7 @@ class App(tk.Tk):
         self.minsize(min(900, self.winfo_screenwidth() - 40), 420)
 
         self.settings = load_settings()
+        self.restore_geometry()
         apply_theme(self, self.settings.theme)
         self.bind("<<ThemeChanged>>", lambda e: e.widget is self and apply_palette(self), add="+")
         if _is_mac(self):                                  # новые окна (диалоги) получают то же оформление
@@ -385,7 +392,15 @@ class App(tk.Tk):
         self.file_meta: dict = {}
         self._build()
         self.protocol("WM_DELETE_WINDOW", self.on_close)
+        if _is_mac(self):
+            self.createcommand("::tk::mac::OpenDocument", self._on_open_documents)     # файл брошен на значок программы / «Открыть в»
+            self.createcommand("tk::mac::Quit", self.on_close)                           # ⌘Q сохраняет состояние
+        self._startup_file = next((Path(a) for a in sys.argv[1:] if a.lower().endswith(STARTUP_FILE_EXT) and Path(a).is_file()), None)
+        self.apply_table_font()
+        self.update_hint()
         self.after(150, self.restore_last_state)          # прошлое состояние восстанавливаем, когда окно уже показано
+        if FIRST_RUN and not self.settings.welcomed:
+            self.after(500, lambda: WelcomeDialog(self))
 
     # ---------- интерфейс ----------
     def _build(self):
@@ -394,6 +409,9 @@ class App(tk.Tk):
         top = ttk.Frame(self)
         top.pack(fill="x", **pad)
         ttk.Button(top, text="Открыть Excel…", command=self.open_file).pack(side="left")
+        self.recent_btn = ttk.Button(top, text="▾", width=2, command=self.show_recent_menu)
+        self.recent_btn.pack(side="left", padx=(2, 0))
+        Tooltip(self.recent_btn, "Последние файлы")
         self.file_lbl = ttk.Label(top, text="Файл не выбран", style="Muted.TLabel")
         self.file_lbl.pack(side="left", padx=(8, 2))
         self.kind_lbl = ttk.Label(top, text="", style="Muted.TLabel")
@@ -432,6 +450,7 @@ class App(tk.Tk):
         self.ip_as_person = tk.BooleanVar(value=self.settings.ip_as_person)
         self.skip_nonres = tk.BooleanVar(value=self.settings.skip_nonresidential)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
+        self.font_var = tk.StringVar(value=FONT_LABELS.get(self.settings.table_font, FONT_LABELS["normal"]))
         self.theme_var = tk.StringVar(value=THEME_LABELS.get(self.settings.theme, THEME_LABELS["system"]))
         self.sort_options = [SORT_DEBT_LABEL]                       # «Сумма долга» + колонки файла (заполняется при загрузке листа)
         self.page_size_var = tk.StringVar(value=str(self.settings.page_size))
@@ -502,6 +521,11 @@ class App(tk.Tk):
 
         table = ttk.Frame(self)
         table.pack(fill="both", expand=True, **pad)
+        self.table_frame = table
+        self.hint_panel = ttk.Frame(table)
+        ttk.Label(self.hint_panel, text="Что делать дальше", font=("", 15, "bold")).pack(anchor="w")
+        for step in NEXT_STEPS:
+            ttk.Label(self.hint_panel, text=step, style="Muted.TLabel", justify="left", wraplength=560).pack(anchor="w", pady=(5, 0))
         self.tree = ttk.Treeview(table, show="headings")
         ys = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(table, orient="horizontal", command=self.tree.xview)
@@ -710,7 +734,10 @@ class App(tk.Tk):
         """Открывает файл отчёта (и лист, если он есть в файле). quiet — без окон с ошибками (восстановление при запуске)."""
         kind, meta = core.detect_file_kind(path)
         if kind == "filtered":
-            return self.open_filtered(path, quiet)              # файл, сохранённый этой программой («Сохранить в Excel»)
+            ok = self.open_filtered(path, quiet)                # файл, сохранённый этой программой («Сохранить в Excel»)
+            if ok:
+                self.add_recent(path)
+            return ok
         try:
             names = core.list_sheets(path)
         except Exception as e:
@@ -724,6 +751,7 @@ class App(tk.Tk):
         chosen = sheet if sheet in names else names[0]
         self.sheet_cb.set(chosen)
         self.load_sheet(chosen)
+        self.add_recent(path)
         return True
 
     def open_filtered(self, path: Path, quiet: bool = False) -> bool:
@@ -846,6 +874,9 @@ class App(tk.Tk):
 
     def restore_last_state(self):
         """При запуске: открыть прошлый файл, заново отфильтровать список и вернуть снятые галочки."""
+        if self._startup_file:                                    # программу запустили с файлом — открываем его, а не прошлый
+            self.open_path(self._startup_file)
+            return
         if not self.settings.restore_state:
             return
         try:
@@ -880,7 +911,71 @@ class App(tk.Tk):
 
     def on_close(self):
         self.save_state()
+        try:
+            self.settings.geometry = self.geometry()
+            self.save_settings_now()
+        except Exception:
+            pass
         self.destroy()
+
+    def restore_geometry(self):
+        """Возвращает размер и положение окна с прошлого раза (если они помещаются на экран)."""
+        m = re.fullmatch(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", self.settings.geometry or "")
+        if not m:
+            return
+        w, h, x, y = map(int, m.groups())
+        sw, sh = self.winfo_screenwidth(), self.winfo_screenheight()
+        w, h = max(600, min(w, sw)), max(360, min(h, sh - 60))
+        x, y = max(0, min(x, sw - 120)), max(0, min(y, sh - 120))
+        self.geometry(f"{w}x{h}+{x}+{y}")
+
+    def _on_open_documents(self, *paths):
+        files = [p for p in paths if str(p).lower().endswith(STARTUP_FILE_EXT)]
+        if files:
+            self.after(100, lambda: self.open_path(Path(files[0])))
+
+    # ---------- последние файлы ----------
+    def add_recent(self, path: Path):
+        p = str(path)
+        self.settings.recent_files = [p] + [r for r in self.settings.recent_files if r != p]
+        self.settings.recent_files = self.settings.recent_files[:8]
+        self.save_settings_now()
+
+    def show_recent_menu(self):
+        menu = tk.Menu(self, tearoff=0)
+        files = [f for f in self.settings.recent_files if Path(f).exists()]
+        for f in files:
+            menu.add_command(label=f"{Path(f).name}  —  {Path(f).parent}", command=lambda f=f: self.open_path(Path(f)))
+        if not files:
+            menu.add_command(label="Список пуст", state="disabled")
+        else:
+            menu.add_separator()
+            menu.add_command(label="Очистить список", command=self.clear_recent)
+        b = self.recent_btn
+        menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+
+    def clear_recent(self):
+        self.settings.recent_files = []
+        self.save_settings_now()
+
+    # ---------- шрифт таблицы ----------
+    TABLE_FONT_STEPS = {"normal": 0, "large": 2, "xlarge": 5}
+
+    def apply_table_font(self):
+        base = tkfont.nametofont("TkDefaultFont")
+        font = tkfont.Font(family=base.actual("family"), size=int(base.actual("size")) + self.TABLE_FONT_STEPS.get(self.settings.table_font, 0))
+        self._table_font = font                                  # ссылку держим, иначе Tk удалит шрифт
+        st = ttk.Style(self)
+        st.configure("Treeview", font=font, rowheight=font.metrics("linespace") + 6)
+
+    # ---------- подсказка на пустом экране ----------
+    def update_hint(self):
+        empty = not self.data_rows
+        if empty:
+            self.hint_panel.place(in_=self.table_frame, relx=0.5, rely=0.42, anchor="center")
+            self.hint_panel.lift()
+        else:
+            self.hint_panel.place_forget()
 
     def _org_from_uk_column(self):
         """Организация по значению колонки «УК» / «Управляющая компания» (в отчётах без заголовка)."""
@@ -1331,6 +1426,7 @@ class App(tk.Tk):
         s.ip_as_person = self.ip_as_person.get()
         s.skip_nonresidential = self.skip_nonres.get()
         s.restore_state = self.restore_var.get()
+        s.table_font = next((k for k, v in FONT_LABELS.items() if v == self.font_var.get()), "normal")
         s.theme = next((k for k, v in THEME_LABELS.items() if v == self.theme_var.get()), "system")
         s.sort_col = None if self.sort_var.get() in ("", SORT_DEBT_LABEL) else self.sort_var.get()
         s.sort_desc = self.sort_dir_var.get() != ASC_LABEL
@@ -1461,6 +1557,7 @@ class App(tk.Tk):
         self.apply_hidden()
         self.fit_columns()
         self.render_page()
+        self.update_hint()
 
     def fit_columns(self):
         """Ширина колонок подгоняется под ширину окна пропорционально их «весу», поэтому таблица
@@ -1517,6 +1614,11 @@ class App(tk.Tk):
     def change_page_size(self):
         self.page = self._page_first // self._page_size()        # остаёмся на той же строке, а не на прежнем номере страницы
         self.render_page()
+        self.save_settings_now()
+
+    def change_table_font(self):
+        self.settings.table_font = self.collect_settings().table_font
+        self.apply_table_font()
         self.save_settings_now()
 
     def change_theme(self):
@@ -1615,6 +1717,14 @@ class App(tk.Tk):
             self.tree.heading(cid, text=title + (("  ▼" if desc else "  ▲") if cid == colid else ""))
 
 
+NEXT_STEPS = (
+    "1. Откройте Excel-файл отчёта: кнопка «Открыть Excel…» (⌘O / Ctrl+O) или перетащите файл на значок программы.",
+    "2. Проверьте организацию и колонки: шестерёнка → «Настройки» и «Организации…» (дома, шапки, участки).",
+    "3. Нажмите «Фильтровать»: останутся физлица с наибольшим долгом.",
+    "4. Заполните данные собственников: двойной клик по строке. Галка в колонке «Данные» — карточка есть.",
+    "5. «Создать документы»: претензии, письмо в ЕИРЦ, заявления о судебном приказе.",
+)
+
 SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70}      # служебные колонки таблицы результата и их ширина
 N_SERVICE = len(SERVICE_COLS)
 
@@ -1683,6 +1793,22 @@ class SettingsDialog(tk.Toplevel):
                                 state="readonly", width=18)
         theme_cb.pack(side="left", padx=8)
         theme_cb.bind("<<ComboboxSelected>>", lambda e: app.change_theme())
+        frow = ttk.Frame(look)
+        frow.pack(fill="x", pady=(6, 0))
+        ttk.Label(frow, text="Шрифт таблицы:").pack(side="left")
+        font_cb = ttk.Combobox(frow, textvariable=app.font_var, values=list(FONT_LABELS.values()), state="readonly", width=18)
+        font_cb.pack(side="left", padx=8)
+        font_cb.bind("<<ComboboxSelected>>", lambda e: app.change_table_font())
+
+        dbox = ttk.LabelFrame(body, text="Данные", padding=8)
+        dbox.pack(fill="x", pady=(10, 0))
+        ttk.Label(dbox, text="Перенос на другой компьютер: настройки, организации, участки и карточки собственников "
+                             "одним файлом. В файле есть персональные данные — передавайте его защищённо.",
+                  style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w")
+        drow = ttk.Frame(dbox)
+        drow.pack(anchor="w", pady=(6, 0))
+        ttk.Button(drow, text="Экспорт данных…", command=self.export_data).pack(side="left")
+        ttk.Button(drow, text="Импорт данных…", command=self.import_data).pack(side="left", padx=(6, 0))
 
         orgs = ttk.LabelFrame(body, text="Организации", padding=8)
         orgs.pack(fill="x", pady=(10, 0))
@@ -1713,6 +1839,39 @@ class SettingsDialog(tk.Toplevel):
         self.bind("<Return>", lambda e: self.close())
         self.bind("<Escape>", lambda e: self.close())
         center_over(self, app)
+
+    def export_data(self):
+        if not messagebox.askokcancel("Экспорт данных", "В файл попадут персональные данные собственников. "
+                                      "Храните и передавайте его только защищённым способом. Продолжить?", parent=self):
+            return
+        p = filedialog.asksaveasfilename(parent=self, defaultextension=".zip", filetypes=[("Архив", "*.zip")],
+                                         initialfile=f"Должники-данные-{date.today():%Y-%m-%d}.zip")
+        if not p:
+            return
+        try:
+            self.app.save_settings_now()
+            names = storage.export_data(p)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}", parent=self)
+            return
+        messagebox.showinfo("Готово", f"Файлов в архиве: {len(names)}\n{p}", parent=self)
+
+    def import_data(self):
+        p = filedialog.askopenfilename(parent=self, filetypes=[("Архив", "*.zip")], title="Файл с данными программы")
+        if not p:
+            return
+        if not messagebox.askokcancel("Импорт данных", "Текущие настройки, организации, участки и карточки будут заменены "
+                                      "данными из файла. Копия текущих данных сохранится в папке backups внутри "
+                                      "~/.debtors. Продолжить?", parent=self):
+            return
+        try:
+            names = storage.import_data(p)
+        except Exception as e:
+            messagebox.showerror("Ошибка", f"Не удалось загрузить данные:\n{e}", parent=self)
+            return
+        messagebox.showinfo("Готово", f"Загружено файлов: {len(names)}. Приложение будет закрыто — запустите его снова.",
+                            parent=self)
+        self.app.destroy()                                        # без сохранения: иначе старые настройки затрут загруженные
 
     def show_courts_info(self):
         d = courtsmod.load()
@@ -2133,6 +2292,39 @@ def open_folder(path: Path) -> None:
         pass
 
 
+class WelcomeDialog(tk.Toplevel):
+    """Приветствие при первом запуске: коротко о том, как работать с программой."""
+
+    def __init__(self, app: "App"):
+        super().__init__(app)
+        self.app = app
+        self.title("Добро пожаловать")
+        self.transient(app)
+        body = ttk.Frame(self, padding=18)
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Должники", font=("", 18, "bold")).pack(anchor="w")
+        ttk.Label(body, text="Поиск должников по отчёту ЕИРЦ и формирование документов для их взыскания.",
+                  wraplength=560, justify="left").pack(anchor="w", pady=(2, 10))
+        for step in NEXT_STEPS:
+            ttk.Label(body, text=step, wraplength=560, justify="left").pack(anchor="w", pady=2)
+        ttk.Label(body, text="Все данные хранятся только на этом компьютере, в папке ~/.debtors.",
+                  style="Muted.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(10, 0))
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(14, 0))
+        ttk.Button(btns, text="Открыть Excel…", command=lambda: self.finish(app.open_file)).pack(side="right")
+        ttk.Button(btns, text="Настроить организации…", command=lambda: self.finish(app.edit_orgs)).pack(side="right", padx=6)
+        ttk.Button(btns, text="Позже", command=lambda: self.finish(None)).pack(side="right")
+        self.protocol("WM_DELETE_WINDOW", lambda: self.finish(None))
+        center_over(self, app)
+
+    def finish(self, then):
+        self.app.settings.welcomed = True
+        self.app.save_settings_now()
+        self.destroy()
+        if then:
+            self.app.after(100, then)
+
+
 class NoProgress:
     """Для небольшого числа документов окно прогресса не нужно."""
     cancelled = False
@@ -2390,6 +2582,8 @@ class OwnerDialog(tk.Toplevel):
         ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
         if owners.get_card(info["address"], info["flat"]):
             ttk.Button(btns, text="Удалить карточку", command=self.remove).pack(side="left")
+        elif owners.has_trashed(info["address"], info["flat"]):
+            ttk.Button(btns, text="Восстановить удалённую карточку", command=self.restore).pack(side="left")
         self._loading = False
         self.refresh_list(0)
         self.load_owner(0)
@@ -2540,8 +2734,16 @@ class OwnerDialog(tk.Toplevel):
         owners.save_card(self.card)
         self.destroy()
 
+    def restore(self):
+        if owners.restore_card(self.info["address"], self.info["flat"]):
+            messagebox.showinfo("Корзина", "Карточка восстановлена.", parent=self)
+            app, info, org = self.app, self.info, self.org
+            self.destroy()
+            OwnerDialog(app, info, org)
+
     def remove(self):
-        if messagebox.askyesno("Удалить", "Удалить карточку помещения с данными собственников (персональные данные)?",
+        if messagebox.askyesno("Удалить", "Удалить карточку помещения с данными собственников?\n\n"
+                               f"Она попадёт в корзину, и её можно будет восстановить в течение {owners.TRASH_DAYS} дней.",
                                parent=self):
             owners.delete_card(self.info["address"], self.info["flat"])
             self.destroy()

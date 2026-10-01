@@ -34,3 +34,64 @@ class MigrationTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TrashAndTransferTest(unittest.TestCase):
+    def setUp(self):
+        import owners as O
+        self.O = O
+        self.old = O.OWNERS_PATH, O.TRASH_PATH
+        self.tmp = Path(tempfile.mkdtemp())
+        O.OWNERS_PATH, O.TRASH_PATH = self.tmp / "owners.json", self.tmp / "trash.json"
+
+    def tearDown(self):
+        self.O.OWNERS_PATH, self.O.TRASH_PATH = self.old
+
+    def test_deleted_card_goes_to_trash_and_can_be_restored(self):
+        O = self.O
+        O.save_card(O.Card(address="ул. Тестовая, д. 1", flat="5", owners=[O.Owner(fio="Иванов Иван", passport="1")]))
+        O.delete_card("ул. Тестовая, д. 1", "5")
+        self.assertIsNone(O.get_card("ул. Тестовая, д. 1", "5"))
+        self.assertTrue(O.has_trashed("ул. Тестовая, д. 1", "5"))
+        card = O.restore_card("ул. Тестовая, д. 1", "5")
+        self.assertEqual(card.owners[0].fio, "Иванов Иван")
+        self.assertFalse(O.has_trashed("ул. Тестовая, д. 1", "5"))
+        self.assertEqual(oct(O.TRASH_PATH.stat().st_mode & 0o777), "0o600")
+
+    def test_old_trash_entries_are_purged(self):
+        import json
+        O = self.O
+        O.TRASH_PATH.write_text(json.dumps({"x|1": {"card": {}, "deleted": "2000-01-01"}}), encoding="utf-8")
+        O.save_card(O.Card(address="ул. А, д. 1", flat="1"))
+        O.delete_card("ул. А, д. 1", "1")
+        self.assertNotIn("x|1", O._load_trash())
+
+    def test_export_import_roundtrip_with_backup(self):
+        import json
+        import storage
+        src, dst = self.tmp / "src", self.tmp / "dst"
+        src.mkdir(); dst.mkdir()
+        (src / "orgs.json").write_text(json.dumps([{"name": "А"}]), encoding="utf-8")
+        (src / "owners.json").write_text("{}", encoding="utf-8")
+        (src / "state.json").write_text("{}", encoding="utf-8")                        # состояние не переносится
+        z = self.tmp / "out.zip"
+        self.assertEqual(sorted(storage.export_data(z, src)), ["orgs.json", "owners.json"])
+        (dst / "orgs.json").write_text("[]", encoding="utf-8")
+        self.assertEqual(storage.import_data(z, dst), ["orgs.json", "owners.json"])
+        self.assertEqual(json.loads((dst / "orgs.json").read_text(encoding="utf-8")), [{"name": "А"}])
+        self.assertEqual(len(list((dst / "backups").glob("*.zip"))), 1)
+        self.assertFalse((dst / "state.json").exists())
+
+    def test_import_rejects_foreign_or_broken_archive(self):
+        import storage
+        import zipfile
+        bad = self.tmp / "bad.zip"
+        with zipfile.ZipFile(bad, "w") as zf:
+            zf.writestr("hello.txt", "x")
+        with self.assertRaises(ValueError):
+            storage.import_data(bad, self.tmp)
+        broken = self.tmp / "broken.zip"
+        with zipfile.ZipFile(broken, "w") as zf:
+            zf.writestr("orgs.json", "{не json")
+        with self.assertRaises(ValueError):
+            storage.import_data(broken, self.tmp)
