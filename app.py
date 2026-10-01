@@ -20,6 +20,7 @@ import courts as courtsmod
 import orgs as orgmod
 import owners
 import storage
+import widgets
 from datetime import date
 
 CONFIG_PATH = storage.SETTINGS_PATH
@@ -240,22 +241,65 @@ def center_on_screen(win: tk.Tk, width: int, height: int) -> None:
     win.geometry(f"{width}x{height}+{x}+{y}")
 
 
+class Dialog(tk.Toplevel):
+    """Дочернее окно, которое не показывается, пока не построено и не поставлено на место (center_over):
+    иначе оно на мгновение появляется в углу экрана и потом «переезжает».
+    На macOS скрытое окно с transient() показывается при первой же обработке событий, поэтому transient
+    откладывается до момента показа."""
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.withdraw()
+        self._transient_master = None
+        self.after(150, self._ensure_shown)                    # страховка, если окно не вызывает center_over (idle-обработчик сработал бы слишком рано)
+
+    def geometry(self, newGeometry=None):
+        """Запоминает заданный размер: у скрытого окна winfo_width() ещё 1, а center_over нужен настоящий размер."""
+        m = re.match(r"(\d+)x(\d+)", newGeometry or "")
+        if m:
+            self._req_size = (int(m.group(1)), int(m.group(2)))
+        return super().geometry(newGeometry) if newGeometry is not None else super().geometry()
+
+    def transient(self, master=None):
+        if master is None:
+            return super().transient()
+        self._transient_master = master
+
+    def show(self):
+        try:
+            if self.state() == "withdrawn":
+                if self._transient_master is not None:
+                    super().transient(self._transient_master)
+                self.deiconify()
+        except tk.TclError:
+            pass                                               # окно уже закрыли
+
+    def _ensure_shown(self):
+        self.show()
+
+
 def center_over(win: tk.Misc, parent: tk.Misc) -> None:
-    """Ставит дочернее окно по центру родительского (и не даёт уйти за край экрана)."""
+    """Ставит дочернее окно по центру родительского (и не даёт уйти за край экрана), затем показывает его."""
     win.update_idletasks()
     parent.update_idletasks()
-    w = max(win.winfo_width(), win.winfo_reqwidth())
-    h = max(win.winfo_height(), win.winfo_reqheight())
+    size = getattr(win, "_req_size", None)                     # размер, заданный окном явно
+    w = size[0] if size else max(win.winfo_width(), win.winfo_reqwidth())
+    h = size[1] if size else max(win.winfo_height(), win.winfo_reqheight())
     x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
     y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
     x = max(0, min(x, win.winfo_screenwidth() - w))
     y = max(0, min(y, win.winfo_screenheight() - h))
+    # geometry задаёт положение с рамкой окна: компенсируем высоту заголовка (её берём у уже показанного родителя)
+    dy = parent.winfo_toplevel().winfo_rooty() - parent.winfo_toplevel().winfo_y()
+    if 0 < dy < 100:
+        y = max(0, y - dy)
     win.geometry(f"{w}x{h}+{x}+{y}")
     win.update_idletasks()
-    # geometry задаёт положение с рамкой окна: компенсируем высоту заголовка
-    dy = win.winfo_rooty() - win.winfo_y()
-    if 0 < dy < 100:
-        win.geometry(f"{w}x{h}+{x}+{max(0, y - dy)}")
+    if isinstance(win, Dialog):
+        win.show()                                             # показываем уже на своём месте
+    elif win.state() == "withdrawn":
+        win.deiconify()
+    win.update_idletasks()
 
 
 def col_width(header: str) -> int:
@@ -301,6 +345,7 @@ def _system_dark_windows() -> bool:
 def set_window_appearance(root: tk.Misc, win: tk.Misc, mode: str) -> None:
     """macOS: светлое/тёмное оформление окна (auto — как в системе)."""
     try:
+        win.update_idletasks()                          # окно должно уже существовать, иначе Tk не может выставить оформление
         root.tk.call("::tk::unsupported::MacWindowStyle", "appearance", win,
                      {"light": "aqua", "dark": "darkaqua"}.get(mode, "auto"))
     except tk.TclError:
@@ -357,6 +402,9 @@ def apply_palette(root: tk.Misc) -> None:
     st.configure("Warn.TLabel", foreground="#f0a93c" if dark else "#b26a00")
     st.configure("Status.TLabel", foreground=muted, font="TkSmallCaptionFont")
     root.stripe_color = stripe
+    panel = getattr(root, "hint_panel", None)
+    if panel is not None:
+        widgets.retheme(panel)
     tree = getattr(root, "tree", None)
     if tree is not None:
         tree.tag_configure("odd", background=stripe)              # чередование строк, как в Finder
@@ -522,10 +570,17 @@ class App(tk.Tk):
         table = ttk.Frame(self)
         table.pack(fill="both", expand=True, **pad)
         self.table_frame = table
-        self.hint_panel = ttk.Frame(table)
-        ttk.Label(self.hint_panel, text="Что делать дальше", font=("", 15, "bold")).pack(anchor="w")
-        for step in NEXT_STEPS:
-            ttk.Label(self.hint_panel, text=step, style="Muted.TLabel", justify="left", wraplength=560).pack(anchor="w", pady=(5, 0))
+        self.hint_panel = tk.Frame(table, bd=0)                  # пустое состояние: закрывает таблицу, пока данных нет
+        self.hint_panel.role = "field"
+        inner = tk.Frame(self.hint_panel, bd=0)
+        inner.role = "field"
+        inner.place(relx=0.5, rely=0.5, anchor="center")
+        head = tk.Label(inner, text="Что делать дальше", bd=0, font=("", 18, "bold"))
+        head.role = "field-label"
+        head.pack()
+        head.pack_configure(pady=(0, 8))
+        widgets.steps_list(inner, NEXT_STEPS).pack()
+        widgets.retheme(self.hint_panel)
         self.tree = ttk.Treeview(table, show="headings")
         ys = ttk.Scrollbar(table, orient="vertical", command=self.tree.yview)
         xs = ttk.Scrollbar(table, orient="horizontal", command=self.tree.xview)
@@ -972,7 +1027,7 @@ class App(tk.Tk):
     def update_hint(self):
         empty = not self.data_rows
         if empty:
-            self.hint_panel.place(in_=self.table_frame, relx=0.5, rely=0.42, anchor="center")
+            self.hint_panel.place(in_=self.table_frame, x=0, y=0, relwidth=1, relheight=1)
             self.hint_panel.lift()
         else:
             self.hint_panel.place_forget()
@@ -1386,7 +1441,7 @@ class App(tk.Tk):
             return "break"
 
     def edit_markers(self):
-        win = tk.Toplevel(self)
+        win = Dialog(self)
         win.title("Признаки организаций")
         win.geometry("420x460")
         win.transient(self)
@@ -1416,6 +1471,8 @@ class App(tk.Tk):
     def collect_settings(self) -> core.Settings:
         s = self.settings
         for key, var in self.col_vars.items():
+            if not self.sheet:                                     # файл не открыт — выбранные раньше колонки не затираем
+                break
             v = var.get()
             setattr(s, key, None if v in ("", NONE) else v)
         try:
@@ -1626,6 +1683,10 @@ class App(tk.Tk):
         self.settings.theme = self.collect_settings().theme
         apply_theme(self, self.settings.theme)
         self.save_settings_now()
+        dlg = getattr(self, "settings_dialog", None)
+        if dlg is not None:
+            self.update_idletasks()
+            widgets.retheme(dlg)                                  # карточки настроек перекрашиваются в новую тему
 
     def save_settings_now(self):
         try:
@@ -1718,11 +1779,11 @@ class App(tk.Tk):
 
 
 NEXT_STEPS = (
-    "1. Откройте Excel-файл отчёта: кнопка «Открыть Excel…» (⌘O / Ctrl+O) или перетащите файл на значок программы.",
-    "2. Проверьте организацию и колонки: шестерёнка → «Настройки» и «Организации…» (дома, шапки, участки).",
-    "3. Нажмите «Фильтровать»: останутся физлица с наибольшим долгом.",
-    "4. Заполните данные собственников: двойной клик по строке. Галка в колонке «Данные» — карточка есть.",
-    "5. «Создать документы»: претензии, письмо в ЕИРЦ, заявления о судебном приказе.",
+    ("Откройте файл отчёта", "Кнопка «Открыть Excel…» (⌘O / Ctrl+O) или перетащите файл на значок программы."),
+    ("Проверьте организацию и колонки", "Шестерёнка → «Настройки» и «Организации» (дома, шапки, участки)."),
+    ("Нажмите «Фильтровать»", "Останутся физлица с наибольшим долгом."),
+    ("Заполните данные собственников", "Двойной клик по строке. Галка в колонке «Данные» — карточка заполнена."),
+    ("Создайте документы", "Претензии, письмо в ЕИРЦ и заявления о судебном приказе."),
 )
 
 SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70}      # служебные колонки таблицы результата и их ширина
@@ -1738,7 +1799,7 @@ COLUMN_FIELDS = {
 OPTIONAL_COLUMNS = ("addr_col", "house_col", "flat_col")
 
 
-class SettingsDialog(tk.Toplevel):
+class SettingsDialog(Dialog):
     """Экран настроек: колонки файла, число должников, правила отбора."""
 
     def __init__(self, app: "App"):
@@ -1746,99 +1807,85 @@ class SettingsDialog(tk.Toplevel):
         self.app = app
         self.title("Настройки")
         self.transient(app)
-        self.resizable(False, False)
+        if _is_mac(app):                                           # тема окна — до построения, чтобы цвета блоков считались верно
+            set_window_appearance(app, self, app.settings.theme)
 
-        body = ttk.Frame(self, padding=12)
-        body.pack(fill="both", expand=True)
+        # прокручиваемая форма из блоков-карточек в стиле системных настроек
+        outer = ttk.Frame(self)
+        outer.pack(fill="both", expand=True, padx=(16, 0), pady=(0, 0))
+        canvas = tk.Canvas(outer, highlightthickness=0, width=1060)
+        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+        body = ttk.Frame(canvas)
+        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
+        win = canvas.create_window((0, 0), window=body, anchor="nw")
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
+        canvas.configure(yscrollcommand=sb.set)
+        canvas.pack(side="left", fill="both", expand=True)
+        sb.pack(side="right", fill="y")
+        canvas._wheel_scrollable = True
+        pad_r = ttk.Frame(body)                               # отступ справа от полосы прокрутки
+        pad_r.pack(fill="both", expand=True, padx=(0, 14))
+        body = pad_r
+        left = ttk.Frame(body)                                # блоки в два столбца: окно не вытягивается по вертикали
+        right = ttk.Frame(body)
+        left.grid(row=0, column=0, sticky="new", padx=(0, 8))
+        right.grid(row=0, column=1, sticky="new", padx=(8, 0))
+        body.columnconfigure(0, weight=1, uniform="cols")
+        body.columnconfigure(1, weight=1, uniform="cols")
 
-        cols = ttk.LabelFrame(body, text="Колонки файла", padding=8)
-        cols.pack(fill="x")
-        for row, (key, text) in enumerate(COLUMN_FIELDS.items()):
-            ttk.Label(cols, text=text).grid(row=row, column=0, sticky="w", pady=3)
-            ttk.Combobox(cols, state="readonly", width=34, textvariable=app.col_vars[key],
-                         values=app.col_options[key]).grid(row=row, column=1, sticky="we", padx=(10, 0), pady=3)
-        cols.columnconfigure(1, weight=1)
-        if not app.sheet:
-            ttk.Label(cols, text="Колонки появятся после открытия файла.", style="Muted.TLabel").grid(
-                row=len(COLUMN_FIELDS), column=0, columnspan=2, sticky="w", pady=(6, 0))
+        cols = widgets.section(left, "Колонки файла", pady=(8, 0))
+        for key, text in COLUMN_FIELDS.items():
+            widgets.PopupSelect(cols.row(text), app.col_vars[key], app.col_options[key] or [""]).pack()
 
-        rules = ttk.LabelFrame(body, text="Отбор", padding=8)
-        rules.pack(fill="x", pady=(10, 0))
-        line = ttk.Frame(rules)
-        line.pack(fill="x")
-        ttk.Label(line, text="Показать должников:").pack(side="left")
-        ttk.Spinbox(line, from_=1, to=100000, textvariable=app.top_n, width=7).pack(side="left", padx=8)
-        ttk.Checkbutton(rules, text="ИП считать физлицами", variable=app.ip_as_person).pack(anchor="w", pady=(6, 0))
-        ttk.Checkbutton(rules, text="Пропускать нежилые помещения (н/п, магазины и т. п.)",
-                        variable=app.skip_nonres).pack(anchor="w", pady=(2, 0))
-        ttk.Checkbutton(rules, text="Запоминать состояние при запуске (файл, список, отметки)",
-                        variable=app.restore_var).pack(anchor="w", pady=(2, 0))
-        srow = ttk.Frame(rules)
-        srow.pack(fill="x", pady=(8, 0))
-        ttk.Label(srow, text="Сортировать по:").pack(side="left")
-        ttk.Combobox(srow, textvariable=app.sort_var, values=app.sort_options, state="readonly", width=26).pack(
-            side="left", padx=(8, 6))
-        ttk.Combobox(srow, textvariable=app.sort_dir_var, values=[DESC_LABEL, ASC_LABEL], state="readonly",
-                     width=34).pack(side="left")
-        ttk.Label(rules, text="Сортировка применяется до отбора: в список попадают первые N должников в этом порядке.",
-                  style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
-        ttk.Button(rules, text="Признаки организаций…", command=app.edit_markers).pack(anchor="w", pady=(8, 0))
+        rules = widgets.section(right, "Отбор", pady=(8, 0))
+        ttk.Spinbox(rules.row("Показать должников"), from_=1, to=100000, textvariable=app.top_n, width=7).pack()
+        widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
+        widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
+        widgets.Switch(rules.row("Запоминать состояние при запуске"), app.restore_var).pack()
+        widgets.PopupSelect(rules.row("Сортировать по"), app.sort_var, app.sort_options).pack()
+        widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()
+        ttk.Button(rules.row("Признаки организаций"), text="Изменить…", command=app.edit_markers).pack()
 
-        look = ttk.LabelFrame(body, text="Внешний вид", padding=8)
-        look.pack(fill="x", pady=(10, 0))
-        lrow = ttk.Frame(look)
-        lrow.pack(fill="x")
-        ttk.Label(lrow, text="Тема:").pack(side="left")
-        theme_cb = ttk.Combobox(lrow, textvariable=app.theme_var, values=list(THEME_LABELS.values()),
-                                state="readonly", width=18)
-        theme_cb.pack(side="left", padx=8)
-        theme_cb.bind("<<ComboboxSelected>>", lambda e: app.change_theme())
-        frow = ttk.Frame(look)
-        frow.pack(fill="x", pady=(6, 0))
-        ttk.Label(frow, text="Шрифт таблицы:").pack(side="left")
-        font_cb = ttk.Combobox(frow, textvariable=app.font_var, values=list(FONT_LABELS.values()), state="readonly", width=18)
-        font_cb.pack(side="left", padx=8)
-        font_cb.bind("<<ComboboxSelected>>", lambda e: app.change_table_font())
+        look = widgets.section(left, "Внешний вид")
+        widgets.PopupSelect(look.row("Тема"), app.theme_var, list(THEME_LABELS.values()), command=app.change_theme).pack()
+        widgets.PopupSelect(look.row("Шрифт таблицы"), app.font_var, list(FONT_LABELS.values()),
+                            command=app.change_table_font).pack()
 
-        dbox = ttk.LabelFrame(body, text="Данные", padding=8)
-        dbox.pack(fill="x", pady=(10, 0))
-        ttk.Label(dbox, text="Перенос на другой компьютер: настройки, организации, участки и карточки собственников "
-                             "одним файлом. В файле есть персональные данные — передавайте его защищённо.",
-                  style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w")
-        drow = ttk.Frame(dbox)
-        drow.pack(anchor="w", pady=(6, 0))
-        ttk.Button(drow, text="Экспорт данных…", command=self.export_data).pack(side="left")
-        ttk.Button(drow, text="Импорт данных…", command=self.import_data).pack(side="left", padx=(6, 0))
+        dbox = widgets.section(left, "Данные")
+        ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
+        ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
-        orgs = ttk.LabelFrame(body, text="Организации", padding=8)
-        orgs.pack(fill="x", pady=(10, 0))
-        ttk.Label(orgs, text="Реквизиты, дома, тексты претензий, письма и заявлений для каждой организации.",
-                  style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w")
-        ttk.Button(orgs, text="Организации…", command=app.edit_orgs).pack(anchor="w", pady=(6, 0))
+        orgs = widgets.section(left, "Организации")
+        ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
-        cf = ttk.LabelFrame(body, text="Судебные участки", padding=8)
-        cf.pack(fill="x", pady=(10, 0))
-        line2 = ttk.Frame(cf)
-        line2.pack(fill="x")
-        ttk.Label(line2, text="Коды регионов:").pack(side="left")
+        cf = widgets.section(right, "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])
-        ttk.Entry(line2, textvariable=self.regions, width=14).pack(side="left", padx=6)
-        ttk.Label(line2, text="(61 — Ростовская обл.; несколько — через запятую)", style="Muted.TLabel").pack(side="left")
-        self.courts_lbl = ttk.Label(cf, text="", wraplength=420, justify="left")
-        self.courts_lbl.pack(anchor="w", pady=(6, 0))
-        brow = ttk.Frame(cf)
-        brow.pack(anchor="w", pady=(6, 0))
-        ttk.Button(brow, text="Загрузить список участков с sudrf.ru", command=self.load_courts).pack(side="left")
-        ttk.Button(brow, text="Судьи и адреса участков…", command=self.edit_courts).pack(side="left", padx=(6, 0))
+        ttk.Entry(cf.row("Коды регионов"), textvariable=self.regions, width=14).pack()
+        right = cf.row("Загружено")
+        self.courts_lbl = tk.Label(right, text="", bd=0)
+        self.courts_lbl.role = "muted"
+        self.courts_lbl.pack()
+        ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
+        ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
         self.show_courts_info()
+        widgets.retheme(self)
 
-        btns = ttk.Frame(body)
-        btns.pack(fill="x", pady=(12, 0))
+        btns = ttk.Frame(self)
+        btns.pack(fill="x", padx=16, pady=12)
         ttk.Button(btns, text="Готово", command=self.close).pack(side="right")
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Return>", lambda e: self.close())
         self.bind("<Escape>", lambda e: self.close())
+        self.update_idletasks()
+        h = min(canvas.bbox("all")[3] + 70, self.winfo_screenheight() - 140)
+        self.geometry(f"1100x{h}")
+        self.resizable(False, True)
+        app.settings_dialog = self
         center_over(self, app)
+
+    def destroy(self):
+        self.app.settings_dialog = None
+        super().destroy()
 
     def export_data(self):
         if not messagebox.askokcancel("Экспорт данных", "В файл попадут персональные данные собственников. "
@@ -2055,7 +2102,7 @@ class AutoCombo(ttk.Frame):
         self.on_pick(key)
 
 
-class CourtEditDialog(tk.Toplevel):
+class CourtEditDialog(Dialog):
     """Данные участка, которых нет в списке sudrf.ru: мировой судья и (при необходимости) исправленный адрес суда."""
 
     def __init__(self, parent, court, on_done):
@@ -2090,7 +2137,7 @@ class CourtEditDialog(tk.Toplevel):
         self.on_done()
 
 
-class CourtsEditorDialog(tk.Toplevel):
+class CourtsEditorDialog(Dialog):
     """Правка судьи и адреса суда у загруженных участков. Можно выделить несколько участков и задать им общий адрес."""
 
     def __init__(self, parent):
@@ -2292,7 +2339,7 @@ def open_folder(path: Path) -> None:
         pass
 
 
-class WelcomeDialog(tk.Toplevel):
+class WelcomeDialog(Dialog):
     """Приветствие при первом запуске: коротко о том, как работать с программой."""
 
     def __init__(self, app: "App"):
@@ -2300,13 +2347,15 @@ class WelcomeDialog(tk.Toplevel):
         self.app = app
         self.title("Добро пожаловать")
         self.transient(app)
+        if _is_mac(app):
+            set_window_appearance(app, self, app.settings.theme)
         body = ttk.Frame(self, padding=18)
         body.pack(fill="both", expand=True)
         ttk.Label(body, text="Должники", font=("", 18, "bold")).pack(anchor="w")
         ttk.Label(body, text="Поиск должников по отчёту ЕИРЦ и формирование документов для их взыскания.",
                   wraplength=560, justify="left").pack(anchor="w", pady=(2, 10))
-        for step in NEXT_STEPS:
-            ttk.Label(body, text=step, wraplength=560, justify="left").pack(anchor="w", pady=2)
+        widgets.steps_list(body, NEXT_STEPS, surface="window", wrap=480).pack(anchor="w")
+        widgets.retheme(body)
         ttk.Label(body, text="Все данные хранятся только на этом компьютере, в папке ~/.debtors.",
                   style="Muted.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(10, 0))
         btns = ttk.Frame(body)
@@ -2336,7 +2385,7 @@ class NoProgress:
         pass
 
 
-class ProgressWindow(tk.Toplevel):
+class ProgressWindow(Dialog):
     """Индикатор выполнения при создании большого числа документов; можно прервать."""
 
     def __init__(self, app: "App", title: str, total: int):
@@ -2370,7 +2419,7 @@ class ProgressWindow(tk.Toplevel):
         self.destroy()
 
 
-class DocsDialog(tk.Toplevel):
+class DocsDialog(Dialog):
     """Подтверждение перед созданием документов: сколько будет создано, что не заполнено и в какую папку сохранить."""
 
     def __init__(self, app: "App", title: str, org_name: str, count: str, summary: str, rows: list[tuple], folder: Path):
@@ -2423,7 +2472,7 @@ class DocsDialog(tk.Toplevel):
         self.destroy()
 
 
-class CourtChoiceDialog(tk.Toplevel):
+class CourtChoiceDialog(Dialog):
     """Перед формированием заявлений: какой судебный участок подставить (для карточек без своего участка)."""
 
     def __init__(self, app: "App", courts: list, last: str, n: int, total: int | None = None):
@@ -2461,7 +2510,7 @@ class CourtChoiceDialog(tk.Toplevel):
         self.destroy()
 
 
-class OwnerDialog(tk.Toplevel):
+class OwnerDialog(Dialog):
     """Карточка помещения: собственники (у помещения их может быть несколько) и данные по делу.
     Заявление о судебном приказе формируется на каждого собственника."""
 
@@ -2497,6 +2546,8 @@ class OwnerDialog(tk.Toplevel):
     def __init__(self, app: "App", info: dict, org: orgmod.Organization):
         super().__init__(app)
         self.app, self.info, self.org = app, info, org
+        if _is_mac(app):
+            set_window_appearance(app, self, app.settings.theme)
         self.card = owners.get_or_new(info["address"], info["flat"])
         # рабочая копия списка собственников; нет сохранённых — один собственник по ФИО из отчёта
         self.owner_list = [replace(o) for o in self.card.owners] or \
@@ -2560,7 +2611,10 @@ class OwnerDialog(tk.Toplevel):
                 var.trace_add("write", lambda *a: self._sync())
         self.unknown = tk.BooleanVar(value=self.card.unknown)
         self.unknown.trace_add("write", lambda *a: self.update_mode())
-        ttk.Checkbutton(obox, text="Собственники неизвестны (шаблон без ФИО)", variable=self.unknown).pack(anchor="w", pady=(4, 0))
+        urow = ttk.Frame(obox)
+        urow.pack(fill="x", pady=(6, 0))
+        ttk.Label(urow, text="Собственники неизвестны (шаблон без ФИО)").pack(side="left")
+        widgets.Switch(urow, self.unknown, surface="window").pack(side="right")
 
         # --- остальные данные (по помещению) ---
         self.vars: dict[str, tk.StringVar] = {}
@@ -2928,7 +2982,7 @@ class HousesEditor(ttk.Frame):
                             parent=self.winfo_toplevel())
 
 
-class OrgDialog(tk.Toplevel):
+class OrgDialog(Dialog):
     """Редактор организаций: реквизиты, дома, текст претензии."""
 
     def __init__(self, parent, orgs, selected, on_close, focus_address: str = ""):
