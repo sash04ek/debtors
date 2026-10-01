@@ -1152,8 +1152,8 @@ class App(tk.Tk):
         courts_list, batch_code = data["courts"], ""
 
         def own_court_code(info: dict, card) -> str:
-            """Участок, уже известный для помещения: выбран в карточке или закреплён за домом в списке домов."""
-            return (card.court_code if card else "") or orgmod.house_court(org, info["address"])
+            """Участок, уже известный для помещения: закреплён за домом в списке домов организации."""
+            return orgmod.house_court(org, info["address"])
         lacking = 0
         for k in pick:
             info = self.row_info(k)
@@ -1183,8 +1183,7 @@ class App(tk.Tk):
                 if card is None:
                     no_card += 1
                     card = owners.get_or_new(info["address"], info["flat"])
-                court_obj = (courtsmod.find_by_code(courts_list, card.court_code)
-                             or courtsmod.find_by_code(courts_list, orgmod.house_court(org, info["address"]))
+                court_obj = (courtsmod.find_by_code(courts_list, orgmod.house_court(org, info["address"]))
                              or courtsmod.find_by_code(courts_list, batch_code))
                 cases = court.plan_cases(card, info["report_fio"], info["debt"])     # по одному на каждого собственника
                 if len(cases) > 1:
@@ -1497,7 +1496,7 @@ class App(tk.Tk):
             if d:
                 card = owners._from_dict(d)
                 self.card_flags[idx] = any(getattr(o, k).strip() for o in card.owners for k in owners.OWNER_FIELDS)
-            self.court_flags[idx] = bool((d and d.get("court_code")) or orgmod.house_court(org, info["address"]))
+            self.court_flags[idx] = bool(orgmod.house_court(org, info["address"]))
 
     def refresh_card_flags(self):
         """Карточки, дома или организация могли измениться — обновляем колонки «Данные» и «Участок» на видимой странице."""
@@ -2196,10 +2195,16 @@ class OwnerDialog(tk.Toplevel):
                 self.vars[key] = var
                 ttk.Entry(box, textvariable=var).pack(fill="x", pady=(0, 4))
             if title == "Дом":
-                ttk.Label(box, text="Судебный участок для заявления (пусто = выбирается при формировании)").pack(anchor="w", pady=(6, 0))
-                self.picker = CourtPicker(box, courtsmod.load()["courts"], self.card.court_code)
-                self.picker.pack(fill="x")
-                ttk.Button(box, text="Сбросить выбор", command=self.picker.clear).pack(anchor="w", pady=(4, 0))
+                ttk.Label(box, text="Судебный участок (назначен дому в настройках организации)").pack(anchor="w", pady=(6, 0))
+                code = orgmod.house_court(org, info["address"])
+                court_obj = courtsmod.find_by_code(courtsmod.load()["courts"], code) if code else None
+                if court_obj:
+                    text = f"{court_obj.name}\nСудья: {court_obj.judge or 'не указан'}\n{court_obj.address}"
+                    ttk.Label(box, text=text, style="Ok.TLabel", justify="left", wraplength=620).pack(anchor="w", pady=(2, 0))
+                else:
+                    ttk.Label(box, text="Дому участок не назначен. Назначьте его в настройках → «Организации…» → «Дома»; "
+                                        "иначе участок выбирается при формировании заявлений.",
+                              style="Muted.TLabel", justify="left", wraplength=620).pack(anchor="w", pady=(2, 0))
 
         btns = ttk.Frame(self, padding=12)
         btns.pack(fill="x")
@@ -2316,7 +2321,7 @@ class OwnerDialog(tk.Toplevel):
         self.card.unknown = bool(self.unknown.get())
         # пустых собственников (без единого заполненного поля) не сохраняем
         self.card.owners = [o for o in self.owner_list if any(getattr(o, k).strip() for k in owners.OWNER_FIELDS)]
-        self.card.court_code = self.picker.get()
+        self.card.court_code = ""             # участок берётся только из списка домов организации
         if self.card.managed_since == orgmod.house_since(self.org, self.info["address"]):
             self.card.managed_since = ""          # совпадает со списком домов — отдельно не храним
         self.card.address = str(self.info["address"]).strip()
