@@ -1366,6 +1366,7 @@ class App(tk.Tk):
         self.num_cols = {j for j in range(len(headers))
                          if headers[j] == debt or any(isinstance(r[j], float) for r in self.data_rows)}
         self.col_titles = {f"c{i}": h for i, h in enumerate(self.cols)}
+        self.tree["displaycolumns"] = "#all"                     # иначе Tk держит ссылки на старые колонки и падает
         self.tree["columns"] = [f"c{i}" for i in range(len(self.cols))]
         saved = self.settings.col_widths
         self.manual_widths = False
