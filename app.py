@@ -2109,9 +2109,6 @@ class OwnerDialog(tk.Toplevel):
             ("payment_order", "Платёжное поручение (№ и дата)"),
             ("invoice_month", "Счёт-извещение за (напр. март 2023 года)"),
         ]),
-        ("Дом", [
-            ("managed_since", "Дом в управлении с (по умолчанию из списка домов организации)"),
-        ]),
     ]
 
     def __init__(self, app: "App", info: dict, org: orgmod.Organization):
@@ -2190,21 +2187,11 @@ class OwnerDialog(tk.Toplevel):
             for key, label in fields_:
                 ttk.Label(box, text=label).pack(anchor="w")
                 var = tk.StringVar(value=getattr(self.card, key))
-                if key == "managed_since" and not self.card.managed_since.strip():
-                    var.set(orgmod.house_since(org, info["address"]))
                 self.vars[key] = var
                 ttk.Entry(box, textvariable=var).pack(fill="x", pady=(0, 4))
-            if title == "Дом":
-                ttk.Label(box, text="Судебный участок (назначен дому в настройках организации)").pack(anchor="w", pady=(6, 0))
-                code = orgmod.house_court(org, info["address"])
-                court_obj = courtsmod.find_by_code(courtsmod.load()["courts"], code) if code else None
-                if court_obj:
-                    text = f"{court_obj.name}\nСудья: {court_obj.judge or 'не указан'}\n{court_obj.address}"
-                    ttk.Label(box, text=text, style="Ok.TLabel", justify="left", wraplength=620).pack(anchor="w", pady=(2, 0))
-                else:
-                    ttk.Label(box, text="Дому участок не назначен. Назначьте его в настройках → «Организации…» → «Дома»; "
-                                        "иначе участок выбирается при формировании заявлений.",
-                              style="Muted.TLabel", justify="left", wraplength=620).pack(anchor="w", pady=(2, 0))
+        self.house_box = ttk.LabelFrame(form, text="Дом", padding=8)
+        self.house_box.pack(fill="x", pady=(0, 8), padx=(0, 10))
+        self.render_house_box()
 
         btns = ttk.Frame(self, padding=12)
         btns.pack(fill="x")
@@ -2216,6 +2203,40 @@ class OwnerDialog(tk.Toplevel):
         self.refresh_list(0)
         self.load_owner(0)
         center_over(self, app)
+
+    # ----- дом: данные только из списка домов организации -----
+    def render_house_box(self):
+        """«В управлении с» и судебный участок дома только показываются; если не указаны — кнопка перехода к списку домов."""
+        for w in self.house_box.winfo_children():
+            w.destroy()
+        addr = self.info["address"]
+        since = orgmod.house_since(self.org, addr)
+        code = orgmod.house_court(self.org, addr)
+        court_obj = courtsmod.find_by_code(courtsmod.load()["courts"], code) if code else None
+
+        def line(title, text, ok):
+            ttk.Label(self.house_box, text=title).pack(anchor="w", pady=(4, 0))
+            if ok:
+                ttk.Label(self.house_box, text=text, style="Ok.TLabel", justify="left", wraplength=620).pack(anchor="w")
+            else:
+                ttk.Label(self.house_box, text="не указан" if title.startswith("В упр") else "не назначен",
+                          style="Warn.TLabel").pack(anchor="w")
+                ttk.Button(self.house_box, text="Указать в списке домов…", command=self.open_houses).pack(anchor="w", pady=(2, 0))
+        line("В управлении с", since, bool(since))
+        line("Судебный участок", f"{court_obj.name}\nСудья: {court_obj.judge or 'не указан'}\n{court_obj.address}"
+             if court_obj else "", bool(court_obj))
+        if since or court_obj:
+            ttk.Button(self.house_box, text="Изменить в списке домов…", command=self.open_houses).pack(anchor="w", pady=(6, 0))
+
+    def open_houses(self):
+        """Переход к списку домов организации (Настройки → Организации → Дома) с выбранным домом; потом данные обновляются."""
+        app = self.app
+        dlg = OrgDialog(app, app.orgs, self.org.name, on_close=lambda name: app.refresh_orgs(name),
+                        focus_address=self.info["address"])
+        self.wait_window(dlg)
+        self.org = app.current_org()
+        self.render_house_box()
+        app.refresh_card_flags()
 
     # ----- список собственников -----
     def _label(self, i: int, o) -> str:
@@ -2321,9 +2342,8 @@ class OwnerDialog(tk.Toplevel):
         self.card.unknown = bool(self.unknown.get())
         # пустых собственников (без единого заполненного поля) не сохраняем
         self.card.owners = [o for o in self.owner_list if any(getattr(o, k).strip() for k in owners.OWNER_FIELDS)]
-        self.card.court_code = ""             # участок берётся только из списка домов организации
-        if self.card.managed_since == orgmod.house_since(self.org, self.info["address"]):
-            self.card.managed_since = ""          # совпадает со списком домов — отдельно не храним
+        self.card.court_code = ""             # участок и дата управления берутся только из списка домов организации
+        self.card.managed_since = ""
         self.card.address = str(self.info["address"]).strip()
         self.card.flat = claim.clean_flat(self.info["flat"])
         owners.save_card(self.card)
@@ -2436,6 +2456,17 @@ class HousesEditor(ttk.Frame):
                 out.append({"address": str(v[0]).strip(), "since": str(v[1]).strip(), "court": self.codes.get(i, "")})
         return out
 
+    def focus_address(self, address: str):
+        """Выбирает дом в списке; если его там нет — подставляет адрес в поле, чтобы осталось нажать «Добавить»."""
+        want = orgmod.norm_addr(address)
+        for item in self.tree.get_children():
+            if orgmod.norm_addr(str(self.tree.item(item, "values")[0])) == want:
+                self.tree.selection_set(item)
+                self.tree.see(item)
+                return
+        self.addr.set(str(address))
+        self.since.set("")
+
     def load_selected(self):
         sel = self.tree.selection()
         if len(sel) == 1:
@@ -2507,7 +2538,7 @@ class HousesEditor(ttk.Frame):
 class OrgDialog(tk.Toplevel):
     """Редактор организаций: реквизиты, дома, текст претензии."""
 
-    def __init__(self, parent, orgs, selected, on_close):
+    def __init__(self, parent, orgs, selected, on_close, focus_address: str = ""):
         super().__init__(parent)
         self.title("Организации")
         self.geometry("820x640")
@@ -2609,6 +2640,9 @@ class OrgDialog(tk.Toplevel):
 
         ttk.Button(left, text="Сохранить и закрыть", command=self.save).pack(fill="x", pady=(16, 0))
         self.refresh(selected)
+        if focus_address:                                       # пришли из карточки собственника — сразу к нужному дому
+            nb.select(hs)
+            self.houses.focus_address(focus_address)
         self.protocol("WM_DELETE_WINDOW", self.save)
         center_over(self, parent)
 
