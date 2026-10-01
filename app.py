@@ -1877,7 +1877,10 @@ class SettingsDialog(Dialog):
         for key, text in COLUMN_FIELDS.items():
             widgets.PopupSelect(cols.row(text), app.col_vars[key], app.col_options[key] or [""]).pack()
 
-        rules = widgets.section(right, "Отбор", pady=(8, 0))
+        orgs = widgets.section(right, "Организации", pady=(8, 0))
+        ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
+
+        rules = widgets.section(right, "Отбор")
         ttk.Spinbox(rules.row("Показать должников"), from_=1, to=100000, textvariable=app.top_n, width=7).pack()
         widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
         widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
@@ -1886,7 +1889,6 @@ class SettingsDialog(Dialog):
         widgets.PopupSelect(rules.row("Сортировать по"), app.sort_var, app.sort_options).pack()
         widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()
         ttk.Button(rules.row("Признаки организаций"), text="Изменить…", command=app.edit_markers).pack()
-        ttk.Button(rules.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
         look = widgets.section(left, "Внешний вид")
         widgets.PopupSelect(look.row("Тема"), app.theme_var, list(THEME_LABELS.values()), command=app.change_theme).pack()
