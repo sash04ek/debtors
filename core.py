@@ -48,6 +48,7 @@ class Settings:
     page_size: int = 50                 # строк таблицы на одной странице
     col_widths: dict = field(default_factory=dict)       # ширина колонок таблицы, заданная мышью: заголовок -> пиксели
     hidden_cols: list[str] = field(default_factory=list)  # скрытые колонки таблицы (по заголовку)
+    courts_query: str = ""              # текст в поиске окна «Судьи и адреса участков» — запоминается между открытиями
     theme: str = "system"               # оформление: system — как в системе, light — светлое, dark — тёмное
     org_markers: list[str] = field(default_factory=lambda: list(DEFAULT_ORG_MARKERS))
     markers_version: int = MARKERS_VERSION   # для дозаписи новых слов в сохранённый список

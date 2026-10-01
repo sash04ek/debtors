@@ -1869,8 +1869,10 @@ class CourtsEditorDialog(tk.Toplevel):
         top = ttk.Frame(self, padding=(12, 10, 12, 0))
         top.pack(fill="x")
         ttk.Label(top, text="Поиск:").pack(side="left")
-        self.query = tk.StringVar()
-        ttk.Entry(top, textvariable=self.query).pack(side="left", fill="x", expand=True, padx=6)
+        self.parent_app = parent
+        self.query = tk.StringVar(value=getattr(parent.settings, "courts_query", ""))      # прошлый поиск запоминается
+        self.query_entry = ttk.Entry(top, textvariable=self.query)
+        self.query_entry.pack(side="left", fill="x", expand=True, padx=6)
         self.query.trace_add("write", lambda *a: self.refresh())
         ttk.Label(top, text="✎ — данные изменены вручную", style="Muted.TLabel").pack(side="left")
 
@@ -1912,6 +1914,16 @@ class CourtsEditorDialog(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.destroy())
         self.refresh()
         center_over(self, parent)
+        self.query_entry.focus_set()
+        self.query_entry.select_range(0, "end")                  # прошлый запрос выделен: можно сразу печатать новый
+
+    def destroy(self):
+        try:
+            self.parent_app.settings.courts_query = self.query.get()
+            self.parent_app.save_settings_now()
+        except Exception:
+            pass
+        super().destroy()
 
     def refresh(self, keep: set | None = None):
         keep = keep if keep is not None else {self.shown[self.tree.index(i)].code for i in self.tree.selection()
