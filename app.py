@@ -242,6 +242,31 @@ def center_on_screen(win: tk.Tk, width: int, height: int) -> None:
     win.geometry(f"{width}x{height}+{x}+{y}")
 
 
+def make_autoscroll(canvas: tk.Canvas, content: tk.Misc, sb: ttk.Scrollbar, pad: int = 0) -> int:
+    """Прокрутка формы только когда содержимое не помещается в окно: иначе область прокрутки равна окну
+    (содержимое не «скачет» от колеса и трекпада), а полоса прокрутки скрыта. Возвращает id окна внутри canvas."""
+    win = canvas.create_window((0, 0), window=content, anchor="nw")
+
+    def update(_e=None):
+        ch, need = canvas.winfo_height(), content.winfo_reqheight()
+        if need <= ch:
+            canvas.configure(scrollregion=(0, 0, canvas.winfo_width(), ch))
+            canvas.yview_moveto(0)
+            if sb.winfo_ismapped():
+                sb.pack_forget()
+        else:
+            canvas.configure(scrollregion=(0, 0, canvas.winfo_width(), need))
+            if not sb.winfo_ismapped():
+                sb.pack(side="right", fill="y")
+
+    def resize(e):
+        canvas.itemconfigure(win, width=e.width)
+        update()
+    content.bind("<Configure>", update)
+    canvas.bind("<Configure>", resize)
+    return win
+
+
 class Dialog(tk.Toplevel):
     """Дочернее окно, которое не показывается, пока не построено и не поставлено на место (center_over):
     иначе оно на мгновение появляется в углу экрана и потом «переезжает».
@@ -1834,12 +1859,9 @@ class SettingsDialog(Dialog):
         canvas = tk.Canvas(outer, highlightthickness=0, width=1060)
         sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         body = ttk.Frame(canvas)
-        body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        win = canvas.create_window((0, 0), window=body, anchor="nw")
-        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
         canvas.configure(yscrollcommand=sb.set)
         canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        make_autoscroll(canvas, body, sb)
         canvas._wheel_scrollable = True
         pad_r = ttk.Frame(body)                               # отступ справа от полосы прокрутки
         pad_r.pack(fill="both", expand=True, padx=(0, 14))
@@ -1874,22 +1896,22 @@ class SettingsDialog(Dialog):
         ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
         ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
-        dty = widgets.section(left, "Госпошлина")
-        widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
-        ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
-
         orgs = widgets.section(left, "Организации")
         ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
         cf = widgets.section(right, "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])
         ttk.Entry(cf.row("Коды регионов"), textvariable=self.regions, width=14).pack()
-        right = cf.row("Загружено")
-        self.courts_lbl = tk.Label(right, text="", bd=0)
+        loaded = cf.row("Загружено")
+        self.courts_lbl = tk.Label(loaded, text="", bd=0)
         self.courts_lbl.role = "muted"
         self.courts_lbl.pack()
         ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
         ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
+        dty = widgets.section(right, "Госпошлина")
+        widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
+        ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
+
         self.show_courts_info()
         widgets.retheme(self)
 
@@ -2734,12 +2756,9 @@ class OwnerDialog(Dialog):
         canvas = tk.Canvas(outer, highlightthickness=0)
         sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         form = ttk.Frame(canvas)
-        form.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        win = canvas.create_window((0, 0), window=form, anchor="nw")
-        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(win, width=e.width))
         canvas.configure(yscrollcommand=sb.set)
         canvas.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
+        make_autoscroll(canvas, form, sb)
         canvas._wheel_scrollable = True   # колесо и трекпад над любыми полями формы прокручивают её
 
         # --- собственники помещения ---
