@@ -1471,6 +1471,8 @@ class App(tk.Tk):
     def collect_settings(self) -> core.Settings:
         s = self.settings
         for key, var in self.col_vars.items():
+            if not self.sheet:                                     # файл не открыт — выбранные раньше колонки не затираем
+                break
             v = var.get()
             setattr(s, key, None if v in ("", NONE) else v)
         try:
@@ -1811,7 +1813,7 @@ class SettingsDialog(Dialog):
         # прокручиваемая форма из блоков-карточек в стиле системных настроек
         outer = ttk.Frame(self)
         outer.pack(fill="both", expand=True, padx=(16, 0), pady=(0, 0))
-        canvas = tk.Canvas(outer, highlightthickness=0, width=600)
+        canvas = tk.Canvas(outer, highlightthickness=0, width=1060)
         sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         body = ttk.Frame(canvas)
         body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -1824,12 +1826,18 @@ class SettingsDialog(Dialog):
         pad_r = ttk.Frame(body)                               # отступ справа от полосы прокрутки
         pad_r.pack(fill="both", expand=True, padx=(0, 14))
         body = pad_r
+        left = ttk.Frame(body)                                # блоки в два столбца: окно не вытягивается по вертикали
+        right = ttk.Frame(body)
+        left.grid(row=0, column=0, sticky="new", padx=(0, 8))
+        right.grid(row=0, column=1, sticky="new", padx=(8, 0))
+        body.columnconfigure(0, weight=1, uniform="cols")
+        body.columnconfigure(1, weight=1, uniform="cols")
 
-        cols = widgets.section(body, "Колонки файла", pady=(8, 0))
+        cols = widgets.section(left, "Колонки файла", pady=(8, 0))
         for key, text in COLUMN_FIELDS.items():
             widgets.PopupSelect(cols.row(text), app.col_vars[key], app.col_options[key] or [""]).pack()
 
-        rules = widgets.section(body, "Отбор")
+        rules = widgets.section(right, "Отбор", pady=(8, 0))
         ttk.Spinbox(rules.row("Показать должников"), from_=1, to=100000, textvariable=app.top_n, width=7).pack()
         widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
         widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
@@ -1838,19 +1846,19 @@ class SettingsDialog(Dialog):
         widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()
         ttk.Button(rules.row("Признаки организаций"), text="Изменить…", command=app.edit_markers).pack()
 
-        look = widgets.section(body, "Внешний вид")
+        look = widgets.section(left, "Внешний вид")
         widgets.PopupSelect(look.row("Тема"), app.theme_var, list(THEME_LABELS.values()), command=app.change_theme).pack()
         widgets.PopupSelect(look.row("Шрифт таблицы"), app.font_var, list(FONT_LABELS.values()),
                             command=app.change_table_font).pack()
 
-        dbox = widgets.section(body, "Данные")
+        dbox = widgets.section(left, "Данные")
         ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
         ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
-        orgs = widgets.section(body, "Организации")
+        orgs = widgets.section(left, "Организации")
         ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
-        cf = widgets.section(body, "Судебные участки")
+        cf = widgets.section(right, "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])
         ttk.Entry(cf.row("Коды регионов"), textvariable=self.regions, width=14).pack()
         right = cf.row("Загружено")
@@ -1870,7 +1878,7 @@ class SettingsDialog(Dialog):
         self.bind("<Escape>", lambda e: self.close())
         self.update_idletasks()
         h = min(canvas.bbox("all")[3] + 70, self.winfo_screenheight() - 140)
-        self.geometry(f"640x{h}")
+        self.geometry(f"1100x{h}")
         self.resizable(False, True)
         app.settings_dialog = self
         center_over(self, app)

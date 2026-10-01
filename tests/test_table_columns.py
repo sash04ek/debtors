@@ -12,7 +12,7 @@ class TableColumnsTest(unittest.TestCase):
         owners._load_all, app.save_settings = (lambda: {}), (lambda s: None)
         a = app.App()
         try:
-            a.settings.addr_col, a.settings.flat_col, a.settings.debt_col = "Адрес", "Кв", "Долг"
+            a.settings.addr_col, a.settings.flat_col, a.settings.debt_col, a.settings.name_col = "Адрес", "Кв", "Долг", "ФИО"
             a.settings.hidden_cols = ["Д3"]
             h = ["ФИО", "Адрес", "Кв", "Долг", "Опл", "Д1", "Д2", "Д3"]
             rows = [[f"n{i}", "ул. Т, д. 1", str(i), "1 234,50", float(i), "x", "x", "x"] for i in range(30)]
