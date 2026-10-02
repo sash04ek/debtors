@@ -3378,13 +3378,12 @@ class OrgDialog(Dialog):
         lrow("Срок ответа ЕИРЦ, дней", self.l_days)
 
         # --- вкладка «Судебный приказ» ---
-        self.c_vars = {k: tk.StringVar() for k in ("applicant_address", "region", "city_in", "duty_default",
+        self.c_vars = {k: tk.StringVar() for k in ("applicant_address", "region", "city_in",
                                                     "license_text", "poa_text")}
         for key, label in (
             ("applicant_address", "Адрес заявителя в заявлении"),
             ("region", "Регион (в адресах помещений)"),
             ("city_in", "Город в предложном падеже («в г. Таганроге»)"),
-            ("duty_default", "Госпошлина, если расчёт выключен или нет суммы, руб."),
             ("license_text", "Уведомление о лицензии («№ 679 от 18.05.2021»)"),
             ("poa_text", "Доверенность от («23.08.2022г.»)"),
         ):
