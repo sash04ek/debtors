@@ -1,6 +1,6 @@
 """Системный выбор даты. В Tk нет встроенного элемента выбора даты, поэтому стандартный календарь операционной системы
 показывается отдельным системным окном, которое запускается вспомогательным процессом:
-- macOS — стандартный NSDatePicker (календарь) в системном диалоге, через osascript (JavaScript for Automation);
+- macOS — стандартный NSDatePicker (календарь) во всплывающей панели под полем, через osascript (JavaScript for Automation);
 - Windows — стандартный календарь MonthCalendar (Windows Forms) в диалоге PowerShell.
 На других системах и при любой неудаче используется календарь самой программы (datepicker.CalendarPopup).
 Результат процесса — одна строка: «OK:гггг-мм-дд», «CLEAR» или «CANCEL»."""
@@ -15,31 +15,58 @@ from datetime import date, datetime
 MAC_SCRIPT = r"""
 ObjC.import('AppKit');
 function run(argv) {
-  var initial = argv[0] || '', allowClear = argv[1] === '1', title = argv[2] || 'Выберите дату', auto = argv[3] || '';
+  var initial = argv[0] || '', allowClear = argv[1] === '1', x = parseFloat(argv[2] || '400'), yBelow = parseFloat(argv[3] || '300'), yAbove = parseFloat(argv[4] || '300'), auto = argv[5] || '', look = argv[6] || '';
   var app = $.NSApplication.sharedApplication;
   app.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
-  app.activateIgnoringOtherApps(true);
   var f = $.NSDateFormatter.alloc.init; f.dateFormat = 'yyyy-MM-dd';
-  var alert = $.NSAlert.alloc.init;
-  alert.messageText = title;
-  alert.addButtonWithTitle('Выбрать'); alert.addButtonWithTitle('Отмена'); if (allowClear) alert.addButtonWithTitle('Очистить');
-  alert.buttons.objectAtIndex(1).keyEquivalent = String.fromCharCode(27);
-  var picker = $.NSDatePicker.alloc.initWithFrame($.NSMakeRect(0, 0, 280, 148));
-  picker.datePickerStyle = 1; picker.datePickerElements = 224;
-  var d = initial ? f.dateFromString(initial) : null;
-  picker.dateValue = d || $.NSDate.date;
-  alert.accessoryView = picker;
+  var state = {result: 'CANCEL'};
+  var picker = $.NSDatePicker.alloc.initWithFrame($.NSMakeRect(0, 0, 10, 10));
+  picker.datePickerStyle = 1; picker.datePickerElements = 224; picker.focusRingType = 1;
+  picker.dateValue = (initial ? f.dateFromString(initial) : null) || $.NSDate.date;
+  picker.sizeToFit;
+  var pw = picker.frame.size.width, ph = picker.frame.size.height;
+  var pad = 10, footer = allowClear ? 30 : 0;
+  var W = pw + 2 * pad, H = ph + 2 * pad + footer;
+  var screenH = $.NSScreen.screens.objectAtIndex(0).frame.size.height, screenW = $.NSScreen.screens.objectAtIndex(0).frame.size.width;
+  var y = (yBelow + H > screenH - 40) ? Math.max(0, yAbove - H - 4) : yBelow;
+  x = Math.max(0, Math.min(x, screenW - W));
+  ObjC.registerSubclass({name: 'DPPanel', superclass: 'NSPanel', methods: {
+    'canBecomeKeyWindow': {types: ['char', []], implementation: function () { return true; }},
+    'cancelOperation:': {types: ['void', ['id']], implementation: function (s) { app.stopModal; }}
+  }});
+  var panel = $.DPPanel.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(x, screenH - y - H, W, H), $.NSWindowStyleMaskBorderless, 2, false);
+  if (look) panel.appearance = $.NSAppearance.appearanceNamed(look === 'dark' ? 'NSAppearanceNameDarkAqua' : 'NSAppearanceNameAqua');
+  panel.opaque = false; panel.backgroundColor = $.NSColor.clearColor; panel.level = 3; panel.hasShadow = true;
+  var fx = $.NSVisualEffectView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H));
+  fx.material = 6; fx.blendingMode = 0; fx.state = 1; fx.wantsLayer = true; fx.layer.cornerRadius = 10; fx.layer.masksToBounds = true;
+  panel.contentView = fx;
+  picker.setFrameOrigin($.NSMakePoint(pad, pad + footer));
+  fx.addSubview(picker);
+  ObjC.registerSubclass({name: 'DPTarget', methods: {
+    'picked:': {types: ['void', ['id']], implementation: function (s) { state.result = 'OK:' + ObjC.unwrap(f.stringFromDate(picker.dateValue)); app.stopModal; }},
+    'cleared:': {types: ['void', ['id']], implementation: function (s) { state.result = 'CLEAR'; app.stopModal; }},
+    'windowDidResignKey:': {types: ['void', ['id']], implementation: function (n) { app.stopModal; }}
+  }});
+  var tgt = $.DPTarget.alloc.init;
+  picker.target = tgt; picker.action = 'picked:';
+  panel.delegate = tgt;
+  if (allowClear) {
+    var b = $.NSButton.alloc.initWithFrame($.NSMakeRect(pad, 6, W - 2 * pad, 22));
+    b.title = 'Очистить'; b.bezelStyle = 1; b.controlSize = 1; b.font = $.NSFont.systemFontOfSize(11); b.target = tgt; b.action = 'cleared:';
+    fx.addSubview(b);
+  }
   if (auto) {
-    ObjC.registerSubclass({name: 'AutoClick', methods: {'tick:': {types: ['void', ['id']], implementation: function (t) {
-      alert.buttons.objectAtIndex(auto === 'clear' ? 2 : 0).performClick($());
-    }}}});
-    var timer = $.NSTimer.timerWithTimeIntervalTargetSelectorUserInfoRepeats(0.7, $.AutoClick.alloc.init, 'tick:', $(), false);
+    ObjC.registerSubclass({name: 'DPAuto', methods: {'tick:': {types: ['void', ['id']], implementation: function (t) {
+      if (auto === 'clear') { state.result = 'CLEAR'; } else { state.result = 'OK:' + ObjC.unwrap(f.stringFromDate(picker.dateValue)); }
+      app.stopModal; }}}});
+    var timer = $.NSTimer.timerWithTimeIntervalTargetSelectorUserInfoRepeats(1.5, $.DPAuto.alloc.init, 'tick:', $(), false);
     $.NSRunLoop.mainRunLoop.addTimerForMode(timer, $.NSRunLoopCommonModes);
   }
-  var resp = alert.runModal;
-  if (resp == 1000) return 'OK:' + ObjC.unwrap(f.stringFromDate(picker.dateValue));
-  if (allowClear && resp == 1002) return 'CLEAR';
-  return 'CANCEL';
+  app.activateIgnoringOtherApps(true);
+  panel.makeKeyAndOrderFront($());
+  app.runModalForWindow(panel);
+  panel.orderOut($());
+  return state.result;
 }
 """
 
@@ -104,11 +131,13 @@ def windows_script(initial: str, allow_clear: bool, title: str, x: int, y: int) 
 
 
 def build_command(initial: str, allow_clear: bool, title: str, x: int = 0, y: int = 0, platform: str | None = None,
-                  auto: str = "") -> tuple[list[str], dict]:
+                  auto: str = "", y_above: int | None = None, look: str = "") -> tuple[list[str], dict]:
     """Команда запуска вспомогательного процесса для текущей (или заданной) платформы и параметры Popen."""
     platform = platform or sys.platform
     if platform == "darwin":
-        return (["osascript", "-l", "JavaScript", "-e", MAC_SCRIPT, initial, "1" if allow_clear else "0", title, auto], {})
+        above = y if y_above is None else y_above
+        return (["osascript", "-l", "JavaScript", "-e", MAC_SCRIPT, initial, "1" if allow_clear else "0", str(int(x)), str(int(y)),
+                 str(int(above)), auto, look], {})
     if platform.startswith("win"):
         encoded = base64.b64encode(windows_script(initial, allow_clear, title, x, y).encode("utf-16-le")).decode("ascii")
         return (["powershell", "-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
@@ -129,9 +158,10 @@ def parse_output(text: str) -> tuple[str, date | None]:
     return "cancel", None
 
 
-def ask(widget, current: date | None, allow_clear: bool, title: str, on_result, x: int = 0, y: int = 0, auto: str = "") -> None:
+def ask(widget, current: date | None, allow_clear: bool, title: str, on_result, x: int = 0, y: int = 0, auto: str = "",
+        y_above: int | None = None, look: str = "") -> None:
     """Показывает системный календарь, не блокируя интерфейс Tk. on_result(kind, date): kind — pick / clear / cancel / error."""
-    cmd, kwargs = build_command(current.strftime("%Y-%m-%d") if current else "", allow_clear, title, x, y, auto=auto)
+    cmd, kwargs = build_command(current.strftime("%Y-%m-%d") if current else "", allow_clear, title, x, y, auto=auto, y_above=y_above, look=look)
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", **kwargs)
     except OSError:

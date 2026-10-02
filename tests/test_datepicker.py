@@ -93,10 +93,11 @@ class NativeTest(unittest.TestCase):
     def test_commands_per_platform(self):
         import base64
         import native_date as nd
-        cmd, kw = nd.build_command("2026-10-09", True, "Дата ухода", platform="darwin")
+        cmd, kw = nd.build_command("2026-10-09", True, "Дата ухода", 100, 200, platform="darwin", y_above=180)
         self.assertEqual(cmd[:4], ["osascript", "-l", "JavaScript", "-e"])
-        self.assertEqual(cmd[5:8], ["2026-10-09", "1", "Дата ухода"])
+        self.assertEqual(cmd[5:], ["2026-10-09", "1", "100", "200", "180", "", ""])
         self.assertIn("NSDatePicker", cmd[4])
+        self.assertIn("NSPanel", cmd[4])
         cmd, kw = nd.build_command("", False, "Дата", 100, 200, platform="win32")
         self.assertEqual(cmd[0], "powershell")
         script = base64.b64decode(cmd[-1]).decode("utf-16-le")
@@ -143,7 +144,7 @@ class NativeTest(unittest.TestCase):
     def test_macos_dialog_end_to_end(self):
         import subprocess
         import native_date as nd
-        cmd, kw = nd.build_command("2026-10-09", True, "Проверка", auto="ok")
+        cmd, kw = nd.build_command("2026-10-09", True, "Проверка", 600, 400, auto="ok")
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, **kw).stdout
         self.assertEqual(nd.parse_output(out), ("pick", date(2026, 10, 9)))
 

@@ -229,9 +229,19 @@ class DateEntry(ttk.Frame):
         if USE_NATIVE and native_date.available():
             self._busy = True
             native_date.ask(self, self.date(), True, self.title, self._native_result,
-                            x=self.entry.winfo_rootx(), y=self.entry.winfo_rooty() + self.entry.winfo_height() + 4)
+                            x=self.entry.winfo_rootx(), y=self.entry.winfo_rooty() + self.entry.winfo_height() + 4,
+                            y_above=self.entry.winfo_rooty(), look=self._look())
         else:
             self.open_builtin()
+
+    def _look(self) -> str:
+        """Тема программы для системного календаря: «dark» или «light» (по яркости фона окна)."""
+        try:
+            main = self.nametowidget(".")
+            bg = main.winfo_rgb(widgets.palette(self)["bg"])
+            return "dark" if sum(bg) < 3 * 32768 else "light"
+        except tk.TclError:
+            return ""
 
     def open_builtin(self) -> None:
         """Календарь самой программы (если системного нет или он не открылся)."""
