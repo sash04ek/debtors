@@ -11,27 +11,32 @@ import orgs  # noqa: E402
 TODAY = date(2026, 10, 1)
 
 
+def managed(since_text: str) -> bool:
+    """Дом со старой строковой записью «В управлении с» (она разбирается на поля, как при чтении файла организаций)."""
+    return orgs.is_managed_house(orgs.normalize_house({"address": "А 1", "since": since_text}), TODAY)
+
+
 class IsManagedTest(unittest.TestCase):
     def test_empty_means_not_managed(self):
-        self.assertFalse(orgs.is_managed("", TODAY))
-        self.assertFalse(orgs.is_managed("   ", TODAY))
+        self.assertFalse(managed(""))
+        self.assertFalse(managed("   "))
 
     def test_single_date_in_past_or_future(self):
-        self.assertTrue(orgs.is_managed("01.06.2015г", TODAY))
-        self.assertTrue(orgs.is_managed("01.06.2015г.", TODAY))
-        self.assertTrue(orgs.is_managed("01.06.15", TODAY))
-        self.assertFalse(orgs.is_managed("01.12.2026г", TODAY))                 # ещё не начался
+        self.assertTrue(managed("01.06.2015г"))
+        self.assertTrue(managed("01.06.2015г."))
+        self.assertTrue(managed("01.06.15"))
+        self.assertFalse(managed("01.12.2026г"))                 # ещё не начался
 
     def test_left_marker(self):
-        self.assertFalse(orgs.is_managed("01.06.2015г ушел", TODAY))
+        self.assertFalse(managed("01.06.2015г ушел"))
 
     def test_period_is_managed_only_inside(self):
-        self.assertFalse(orgs.is_managed("01.12.2019г-01.11.2020гг", TODAY))
-        self.assertFalse(orgs.is_managed("01.07.2019-01.09.2019гг", TODAY))
-        self.assertTrue(orgs.is_managed("01.01.2026-31.12.2026", TODAY))
+        self.assertFalse(managed("01.12.2019г-01.11.2020гг"))
+        self.assertFalse(managed("01.07.2019-01.09.2019гг"))
+        self.assertTrue(managed("01.01.2026-31.12.2026"))
 
     def test_text_without_date_counts_as_filled(self):
-        self.assertTrue(orgs.is_managed("с начала", TODAY))
+        self.assertTrue(managed("с начала"))
 
 
 class FilterTest(unittest.TestCase):

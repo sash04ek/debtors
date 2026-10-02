@@ -14,7 +14,7 @@ def is_aqua(root: tk.Misc) -> bool:
     return root.tk.call("tk", "windowingsystem") == "aqua"
 
 
-def _mix(root: tk.Misc, a: str, b: str, k: float) -> str:
+def mix(root: tk.Misc, a: str, b: str, k: float) -> str:
     """Цвет между a (k=0) и b (k=1). Системные цвета считаются по главному окну: у нового диалога оформление
     (светлое/тёмное) ещё не выставлено и могло бы дать цвет другой темы."""
     main = root.nametowidget(".")
@@ -39,9 +39,9 @@ def palette(root: tk.Misc) -> dict:
     bg = st.lookup("TFrame", "background") or st.lookup("TLabel", "background") or "white"
     try:
         card = bg                                   # фон карточки как у окна: иначе вокруг ttk-кнопок видны светлые «заплатки»
-        pal = {"bg": bg, "fg": fg, "card": card, "line": _mix(root, bg, fg, 0.16),
-               "muted": _mix(root, fg, bg, 0.45), "chip": _mix(root, card, fg, 0.12),
-               "off": _mix(root, card, fg, 0.30)}
+        pal = {"bg": bg, "fg": fg, "card": card, "line": mix(root, bg, fg, 0.16),
+               "muted": mix(root, fg, bg, 0.45), "chip": mix(root, card, fg, 0.12),
+               "off": mix(root, card, fg, 0.30)}
     except tk.TclError:
         pal = {"bg": "#ececec", "fg": "#000000", "card": "#f5f5f5", "line": "#d0d0d0", "muted": "#808080",
                "chip": "#e0e0e0", "off": "#b0b0b0"}
@@ -74,7 +74,7 @@ class _AquaSwitch(tk.Canvas):
         self.bind("<FocusIn>", lambda e: self._set_focus(True))
         self.bind("<FocusOut>", lambda e: self._set_focus(False))
         self.configure(takefocus=1)
-        self._trace = variable.trace_add("write", lambda *a: self.redraw())
+        variable.trace_add("write", lambda *a: self.redraw())
         self.redraw()
 
     def _set_focus(self, value: bool):
@@ -108,7 +108,7 @@ class _AquaSwitch(tk.Canvas):
         x = m + w - 2 - d if on else m + 2
         y = m + 2
         try:
-            shadow = _mix(self, color, "#000000", 0.35)
+            shadow = mix(self, color, "#000000", 0.35)
         except tk.TclError:
             shadow = "#555555"
         self.create_oval(x - 0.5, y + 0.5, x + d + 0.5, y + d + 1.5, fill=shadow, outline="")      # мягкая тень под кнопкой

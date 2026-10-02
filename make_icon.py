@@ -3,7 +3,7 @@ import subprocess
 import shutil
 from pathlib import Path
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
 OUT = Path(__file__).parent / "assets"
 S = 2048  # рисуем крупно, потом уменьшаем — гладкие края

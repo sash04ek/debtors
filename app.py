@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import os
 import re
 import subprocess
@@ -376,12 +375,6 @@ def fmt_money(v: float) -> str:
     return f"{v:,.2f}".replace(",", " ").replace(".", ",")
 
 
-def _mix(root: tk.Misc, fg: str, bg: str, k: float) -> str:
-    """Цвет между текстом и фоном: k=0 — цвет текста, k=1 — цвет фона."""
-    (r1, g1, b1), (r2, g2, b2) = root.winfo_rgb(fg), root.winfo_rgb(bg)
-    return "#%02x%02x%02x" % tuple(int((a + (b - a) * k) / 257) for a, b in ((r1, r2), (g1, g2), (b1, b2)))
-
-
 FONT_LABELS = {"normal": "Обычный", "large": "Крупный", "xlarge": "Очень крупный"}
 THEME_LABELS = {"system": "Как в системе", "light": "Светлая", "dark": "Тёмная"}
 DARK_COLORS = {"bg": "#2b2b2b", "fg": "#e6e6e6", "field": "#1e1e1e", "select": "#0a5cc7"}
@@ -452,8 +445,8 @@ def apply_palette(root: tk.Misc) -> None:
     field = "systemTextBackgroundColor" if _is_mac(root) else (st.lookup("Treeview", "fieldbackground") or "white")
     try:
         dark = sum(root.winfo_rgb(bg)) < 3 * 32768
-        muted = _mix(root, fg, bg, 0.45)
-        stripe = _mix(root, field, fg, 0.07 if dark else 0.04)
+        muted = widgets.mix(root, fg, bg, 0.45)
+        stripe = widgets.mix(root, field, fg, 0.07 if dark else 0.04)
     except tk.TclError:
         dark, muted, stripe = False, "gray", "#f4f5f5"
     st.configure("Muted.TLabel", foreground=muted)
@@ -1257,7 +1250,7 @@ class App(tk.Tk):
         self.orgs = orgmod.load_orgs()
         names = [o.name for o in self.orgs]
         self.org_cb["values"] = names
-        self.org_cb.set(keep if keep in names else (self.settings_org if getattr(self, "settings_org", None) in names else names[0]))
+        self.org_cb.set(keep if keep in names else names[0])
 
     def current_org(self) -> orgmod.Organization:
         return next((o for o in self.orgs if o.name == self.org_cb.get()), self.orgs[0])
@@ -1353,7 +1346,7 @@ class App(tk.Tk):
         s, org = self.settings, self.current_org()
         title = self.DOC_KINDS[kind]
         if not (s.addr_col and s.flat_col):
-            messagebox.showinfo("Нет колонок", f"Для документов выберите колонки «Адрес дома» и «Квартира» в настройках.")
+            messagebox.showinfo("Нет колонок", "Для документов выберите колонки «Адрес дома» и «Квартира» в настройках.")
             return
         if kind == "letter" and not org.letter_header.strip():
             messagebox.showinfo("Нет шапки", "Заполните вкладку «Письмо в ЕИРЦ» в настройках → «Организации…».")
@@ -1653,7 +1646,6 @@ class App(tk.Tk):
             s.top_n = max(1, int(self.top_n.get()))
         except (tk.TclError, ValueError):
             s.top_n = 20
-        s.inn_col = s.type_col = None
         s.ip_as_person = self.ip_as_person.get()
         s.skip_nonresidential = self.skip_nonres.get()
         s.only_managed = self.only_managed.get()
@@ -3208,8 +3200,6 @@ class OwnerDialog(Dialog):
         self.card.unknown = bool(self.unknown.get())
         # пустых собственников (без единого заполненного поля) не сохраняем
         self.card.owners = [o for o in self.owner_list if any(getattr(o, k).strip() for k in owners.OWNER_FIELDS)]
-        self.card.court_code = ""             # участок и дата управления берутся только из списка домов организации
-        self.card.managed_since = ""
         self.card.address = str(self.info["address"]).strip()
         self.card.flat = claim.clean_flat(self.info["flat"])
         owners.save_card(self.card)

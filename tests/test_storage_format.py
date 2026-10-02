@@ -84,3 +84,30 @@ class VersionedJsonTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RemovedFieldsCompatTest(unittest.TestCase):
+    """Поля, убранные из программы, остаются в старых файлах и не мешают чтению."""
+
+    def test_old_card_and_org_and_settings_keys_are_ignored(self):
+        import owners
+        import orgs
+        card = owners._from_dict({"address": "ул. А, д. 1", "flat": "5", "court_code": "61MS0001", "managed_since": "01.01.2020",
+                                  "owners": [{"fio": "Иванов Иван"}]})
+        self.assertEqual(card.owners[0].fio, "Иванов Иван")
+        self.assertFalse(hasattr(card, "court_code"))
+        org = orgs.Organization(**{k: v for k, v in {"name": "О", "match": "О", "claim_no_prefix": "", "duty_default": "200"}.items()
+                                   if k in {f.name for f in orgs.fields(orgs.Organization)}})
+        self.assertEqual(org.name, "О")
+
+    def test_settings_file_with_removed_keys_loads(self):
+        import app
+        d = Path(tempfile.mkdtemp())
+        (d / "settings.json").write_text(json.dumps({"top_n": 7, "inn_col": "ИНН", "type_col": "Тип", "type_value": "физ"}),
+                                         encoding="utf-8")
+        old = app.CONFIG_PATH
+        app.CONFIG_PATH = d / "settings.json"
+        try:
+            self.assertEqual(app.load_settings().top_n, 7)
+        finally:
+            app.CONFIG_PATH = old

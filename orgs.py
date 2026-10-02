@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import re
 from dataclasses import asdict, dataclass, field, fields
-from pathlib import Path
 
 import storage
 
@@ -45,7 +43,6 @@ class Organization:
     agent_address: str = ""
     days: str = "10 (десяти) дней"
     body: str = ""                     # пусто → стандартный текст
-    claim_no_prefix: str = ""          # необязательно, зарезервировано
     # --- письмо в ЕИРЦ (запрос выписок по должникам) ---
     letter_header: str = ""            # шапка письма; строки с «# » — крупно (14 пт), все строки жирные
     letter_to: str = ""                # кому (справа); **жирный**
@@ -176,14 +173,6 @@ def find_by_title(orgs: list[Organization], title: str) -> Organization | None:
     return None
 
 
-def find_by_house(orgs: list[Organization], address: str) -> Organization | None:
-    a = norm_addr(address)
-    for o in orgs:
-        if any(norm_addr(h["address"]) == a for h in o.houses):
-            return o
-    return None
-
-
 def house_addresses(org: Organization) -> set[str]:
     """Нормализованные адреса домов организации."""
     return {norm_addr(h["address"]) for h in org.houses}
@@ -278,12 +267,6 @@ def is_managed_house(h: dict, today=None) -> bool:
     if until and today > until:
         return False
     return True
-
-
-def is_managed(since: str, today=None) -> bool:
-    """То же по прежней строковой записи «В управлении с» («01.06.2015г», «01.12.2019г-01.11.2020гг», «… ушел»)."""
-    s, u, left = split_since(since)
-    return is_managed_house({"since": s, "until": u, "left": left}, today)
 
 
 def house_period_text(h: dict) -> str:
