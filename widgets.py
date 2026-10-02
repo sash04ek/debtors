@@ -1,10 +1,17 @@
-"""Элементы оформления в стиле системных настроек macOS: переключатель, выпадающий список со стрелками,
-блок-карточка со строками. Цвета берутся от текущей темы (светлой/тёмной) и обновляются через retheme()."""
+"""Элементы оформления: переключатель, выпадающий список, блок-карточка со строками.
+На macOS это элементы в стиле системных настроек (переключатель-«таблетка», список со стрелками вверх/вниз,
+скруглённая карточка), на Windows и Linux — стандартные: флажок ttk.Checkbutton и ttk.Combobox, карточка с почти
+прямыми углами. Цвета берутся от текущей темы (светлой/тёмной) и обновляются через retheme()."""
 from __future__ import annotations
 
 import tkinter as tk
 import tkinter.font as tkfont
 from tkinter import ttk
+
+
+def is_aqua(root: tk.Misc) -> bool:
+    """Работаем на macOS (Aqua)?"""
+    return root.tk.call("tk", "windowingsystem") == "aqua"
 
 
 def _mix(root: tk.Misc, a: str, b: str, k: float) -> str:
@@ -53,12 +60,12 @@ def palette(root: tk.Misc) -> dict:
     return pal
 
 
-class Switch(tk.Canvas):
-    """Переключатель вместо флажка; связан с BooleanVar."""
+class _AquaSwitch(tk.Canvas):
+    """Переключатель вместо флажка (macOS); связан с BooleanVar. Управляется и с клавиатуры: Tab — фокус, пробел — переключить."""
     W, H = 28, 16
 
     def __init__(self, parent, variable: tk.BooleanVar, command=None, surface: str = "card"):
-        super().__init__(parent, width=self.W, height=self.H, highlightthickness=0, bd=0)
+        super().__init__(parent, width=self.W, height=self.H, highlightthickness=2, bd=0)
         self.var, self.command, self.role, self.surface = variable, command, "switch", surface
         self.pal = palette(self)
         self.bind("<Button-1>", self._toggle)
@@ -75,7 +82,8 @@ class Switch(tk.Canvas):
     def redraw(self, pal: dict | None = None):
         self.pal = pal or self.pal
         p, on = self.pal, bool(self.var.get())
-        self.configure(bg=p["card"] if self.surface == "card" else p["bg"])
+        surface = p["card"] if self.surface == "card" else p["bg"]
+        self.configure(bg=surface, highlightbackground=surface, highlightcolor=p["accent"])      # рамка фокуса при навигации Tab
         self.delete("all")
         h = self.H
         color = p["accent"] if on else p["off"]
@@ -86,11 +94,11 @@ class Switch(tk.Canvas):
         self.create_oval(x, 2, x + h - 4, h - 2, fill="#ffffff", outline="#ffffff")
 
 
-class PopupSelect(tk.Frame):
-    """Выпадающий список как в настройках macOS: значение справа и кнопка со стрелками вверх/вниз."""
+class _AquaPopupSelect(tk.Frame):
+    """Выпадающий список как в настройках macOS (значение и кнопка со стрелками вверх/вниз). С клавиатуры: Tab — фокус, пробел/Enter/↓ — открыть."""
 
     def __init__(self, parent, variable: tk.StringVar | None, values, command=None, width: int = 0):
-        super().__init__(parent, bd=0, highlightthickness=0)
+        super().__init__(parent, bd=0, highlightthickness=2, takefocus=1)
         self.var = variable if variable is not None else tk.StringVar()
         self.values, self.command, self.role = list(values), command, "select"
         self.pal = palette(self)
@@ -101,12 +109,14 @@ class PopupSelect(tk.Frame):
         self.chip.pack(side="left")
         for w in (self, self.lbl, self.chip):
             w.bind("<Button-1>", self.open)
+        for seq in ("<space>", "<Return>", "<Down>"):
+            self.bind(seq, self.open)
         self.redraw()
 
     def redraw(self, pal: dict | None = None):
         self.pal = pal or self.pal
         p = self.pal
-        self.configure(bg=p["card"])
+        self.configure(bg=p["card"], highlightbackground=p["card"], highlightcolor=p["accent"])
         self.lbl.configure(bg=p["card"], fg=p["fg"])
         c = self.chip
         c.configure(bg=p["card"])
@@ -142,12 +152,34 @@ class PopupSelect(tk.Frame):
             self.command()
 
 
+def Switch(parent, variable: tk.BooleanVar, command=None, surface: str = "card"):
+    """Переключатель: «таблетка» на macOS, стандартный флажок на Windows/Linux (подпись стоит слева, в строке карточки)."""
+    if is_aqua(parent):
+        return _AquaSwitch(parent, variable, command, surface)
+    return ttk.Checkbutton(parent, variable=variable, command=command)
+
+
+def PopupSelect(parent, variable: tk.StringVar | None, values, command=None, width: int = 0, chars: int = 0):
+    """Выпадающий список: в стиле настроек macOS или стандартный ttk.Combobox (Windows/Linux).
+    width — ширина подписи в символах на macOS; chars — ширина поля в символах на Windows/Linux (0 — по самому длинному значению)."""
+    if is_aqua(parent):
+        return _AquaPopupSelect(parent, variable, values, command, width)
+    values = list(values)
+    var = variable if variable is not None else tk.StringVar()
+    size = chars or min(max([len(v) for v in values] + [8]) + 2, 48)
+    cb = ttk.Combobox(parent, textvariable=var, values=values, state="readonly", width=size)
+    if command:
+        cb.bind("<<ComboboxSelected>>", lambda e: command())
+    return cb
+
+
 class Card(tk.Canvas):
     """Блок со строками «название — элемент справа», разделёнными тонкими линиями; рамка со скруглёнными углами."""
-    RADIUS, PAD_X, PAD_Y = 10, 2, 5
+    PAD_X, PAD_Y = 2, 5
 
     def __init__(self, parent):
         super().__init__(parent, bd=0, highlightthickness=0, height=20)
+        self.RADIUS = 10 if is_aqua(parent) else 3                        # macOS — крупное скругление, Windows — почти прямые углы
         self.role, self._rows = "card-rounded", 0
         self.pal = palette(self)
         self.body = tk.Frame(self, bd=0)

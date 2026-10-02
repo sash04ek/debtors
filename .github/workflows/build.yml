@@ -17,6 +17,12 @@ jobs:
       - uses: actions/setup-python@v7
         with: { python-version: "3.12" }
       - run: pip install -r requirements.txt pyinstaller
+      - name: Версия из тега
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: python
+        run: |
+          import os
+          open("version.py", "w", encoding="utf-8").write("VERSION = %r\n" % os.environ["GITHUB_REF_NAME"])
       - if: runner.os == 'Windows'
         run: pyinstaller --noconfirm --collect-data petrovich --windowed --onefile --icon assets/icon.ico --add-data "assets/icon.png;assets" --add-data "assets/gear.png;assets" --add-data "assets/gear_hover.png;assets" --name Debtors app.py
       - if: runner.os == 'macOS'
