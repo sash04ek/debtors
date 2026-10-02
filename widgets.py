@@ -89,11 +89,13 @@ class Switch(tk.Canvas):
 class PopupSelect(tk.Frame):
     """Выпадающий список как в настройках macOS: значение справа и кнопка со стрелками вверх/вниз."""
 
-    def __init__(self, parent, variable: tk.StringVar, values, command=None):
+    def __init__(self, parent, variable: tk.StringVar | None, values, command=None, width: int = 0):
         super().__init__(parent, bd=0, highlightthickness=0)
-        self.var, self.values, self.command, self.role = variable, list(values), command, "select"
+        self.var = variable if variable is not None else tk.StringVar()
+        self.values, self.command, self.role = list(values), command, "select"
         self.pal = palette(self)
-        self.lbl = tk.Label(self, textvariable=variable, bd=0, padx=0)
+        # width > 0: подпись фиксированной ширины (в символах) и прижата влево — для панелей инструментов
+        self.lbl = tk.Label(self, textvariable=self.var, bd=0, padx=0, **({"width": width, "anchor": "w"} if width else {}))
         self.lbl.pack(side="left", padx=(0, 6))
         self.chip = tk.Canvas(self, width=16, height=16, highlightthickness=0, bd=0)
         self.chip.pack(side="left")
@@ -112,6 +114,22 @@ class PopupSelect(tk.Frame):
         c.create_rectangle(0, 0, 16, 16, fill=p["chip"], outline=p["chip"])
         c.create_line(5, 6.5, 8, 3.5, 11, 6.5, fill=p["fg"], width=1.6, capstyle="round", joinstyle="round")      # вверх
         c.create_line(5, 9.5, 8, 12.5, 11, 9.5, fill=p["fg"], width=1.6, capstyle="round", joinstyle="round")     # вниз
+
+    # совместимость с ttk.Combobox, чтобы заменять его без переписывания кода вокруг
+    def get(self) -> str:
+        return self.var.get()
+
+    def set(self, value: str) -> None:
+        self.var.set(value)
+
+    def __setitem__(self, key, value):
+        if key == "values":
+            self.values = list(value)
+        else:
+            super().__setitem__(key, value)
+
+    def __getitem__(self, key):
+        return self.values if key == "values" else super().__getitem__(key)
 
     def open(self, _e=None):
         menu = tk.Menu(self, tearoff=0)
