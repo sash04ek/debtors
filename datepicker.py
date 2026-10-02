@@ -186,7 +186,8 @@ class CalendarPopup(tk.Toplevel):
 
 
 class DateEntry(ttk.Frame):
-    """Поле даты с кнопкой «▾» (календарь). suffix — что дописывать к выбранной дате (например «г.»)."""
+    """Поле даты: календарь открывается кликом по полю (а также клавишами ↓ и F4). suffix — что дописывать к выбранной
+    дате (например «г.»). Дату можно и набрать руками."""
 
     def __init__(self, parent, textvariable: tk.StringVar | None = None, suffix: str = "", width: int = 12, command=None,
                  title: str = "Выберите дату"):
@@ -196,8 +197,9 @@ class DateEntry(ttk.Frame):
         self._busy = False
         self.entry = ttk.Entry(self, textvariable=self.var, width=width)
         self.entry.pack(side="left")
-        self.button = ttk.Button(self, text="▾", width=2, style="Toolbutton", takefocus=False, command=self.open_calendar)
-        self.button.pack(side="left", padx=(3, 0))
+        self.entry.bind("<Button-1>", self._clicked, add="+")
+        self.entry.bind("<Down>", lambda e: (self.open_calendar(), "break")[1])
+        self.entry.bind("<F4>", lambda e: (self.open_calendar(), "break")[1])
         self.entry.bind("<FocusOut>", lambda e: self.tidy(), add="+")
         self.entry.bind("<Return>", lambda e: self.tidy(), add="+")
         self._popup: CalendarPopup | None = None
@@ -219,11 +221,14 @@ class DateEntry(ttk.Frame):
             self.var.set(fixed)
 
     def set_enabled(self, enabled: bool) -> None:
-        for w in (self.entry, self.button):
-            w.state(["!disabled"] if enabled else ["disabled"])
+        self.entry.state(["!disabled"] if enabled else ["disabled"])
+
+    def _clicked(self, _event=None) -> None:
+        """Клик по полю: сначала поле получает фокус и курсор, потом открывается календарь."""
+        self.after_idle(self.open_calendar)
 
     def open_calendar(self) -> None:
-        if str(self.button.cget("state")) == "disabled" or self._busy:
+        if self.entry.instate(["disabled"]) or self._busy:
             return
         self.tidy()
         if USE_NATIVE and native_date.available():

@@ -2,6 +2,7 @@
 import sys
 import tkinter as tk
 import unittest
+from tkinter import ttk
 from datetime import date
 from pathlib import Path
 
@@ -67,6 +68,27 @@ class WidgetTest(unittest.TestCase):
         var.set("март 2023")
         w.tidy()
         self.assertEqual(var.get(), "март 2023")
+
+    def test_click_on_field_opens_calendar_and_no_arrow_button(self):
+        w = dp.DateEntry(self.root, tk.StringVar(value="15.03.2020"))
+        w.pack()
+        self.root.update()
+        self.assertEqual([c for c in w.winfo_children() if isinstance(c, ttk.Button)], [])      # кнопки со стрелкой нет
+        opened = []
+        w.open_calendar = lambda: opened.append(1)
+        w.entry.event_generate("<Button-1>", x=5, y=5)
+        self.root.update()
+        self.assertEqual(opened, [1])
+        w.entry.event_generate("<Down>")
+        self.assertEqual(len(opened), 2)
+
+    def test_disabled_field_does_not_open(self):
+        w = dp.DateEntry(self.root, tk.StringVar())
+        w.pack()
+        w.set_enabled(False)
+        w.open_calendar()
+        self.assertIsNone(w._popup)
+        w.set_enabled(True)
 
     def test_year_navigation_wraps_months(self):
         w = dp.DateEntry(self.root, tk.StringVar(value="31.12.2025"))
