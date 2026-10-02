@@ -96,7 +96,8 @@ def region_codes(regions: str) -> list[str]:
 
 def regions_summary(regions: str) -> str:
     """Короткая подпись для строки настроек: один регион — «Название (код)», несколько — «Название (код) и ещё N»."""
-    codes = region_codes(regions) or [DEFAULT_REGIONS]
+    codes = region_codes(regions)
+    codes = [c for c in codes if c in REGIONS] or codes or [DEFAULT_REGIONS]       # дополнительные коды (182 и т. п.) отдельным регионом не считаем
     first = region_label(codes[0])
     return first if len(codes) == 1 else f"{first} и ещё {len(codes) - 1}"
 

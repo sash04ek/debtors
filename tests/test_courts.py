@@ -108,6 +108,7 @@ class RegionSelectTest(unittest.TestCase):
         self.assertEqual(C.regions_summary("61"), "Ростовская область (61)")
         self.assertEqual(C.regions_summary("61, 23, 05"), "Ростовская область (61) и ещё 2")
         self.assertEqual(C.regions_summary(""), "Ростовская область (61)")
+        self.assertEqual(C.regions_summary("61, 82, 182, 92"), "Ростовская область (61) и ещё 2")      # 182 — доп. код Крыма
 
     def test_several_regions_are_stored_and_used_for_download(self):
         C.set_regions("61, 23")
