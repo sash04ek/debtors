@@ -62,16 +62,23 @@ def palette(root: tk.Misc) -> dict:
 
 class _AquaSwitch(tk.Canvas):
     """Переключатель вместо флажка (macOS); связан с BooleanVar. Управляется и с клавиатуры: Tab — фокус, пробел — переключить."""
-    W, H = 28, 16
+    W, H, M = 28, 16, 2                                    # размер «таблетки» и поле вокруг неё (под кольцо фокуса)
 
     def __init__(self, parent, variable: tk.BooleanVar, command=None, surface: str = "card"):
-        super().__init__(parent, width=self.W, height=self.H, highlightthickness=2, bd=0)
+        super().__init__(parent, width=self.W + 2 * self.M, height=self.H + 2 * self.M, highlightthickness=0, bd=0)
         self.var, self.command, self.role, self.surface = variable, command, "switch", surface
+        self.focused = False
         self.pal = palette(self)
         self.bind("<Button-1>", self._toggle)
         self.bind("<space>", self._toggle)
+        self.bind("<FocusIn>", lambda e: self._set_focus(True))
+        self.bind("<FocusOut>", lambda e: self._set_focus(False))
         self.configure(takefocus=1)
         self._trace = variable.trace_add("write", lambda *a: self.redraw())
+        self.redraw()
+
+    def _set_focus(self, value: bool):
+        self.focused = value
         self.redraw()
 
     def _toggle(self, _e=None):
@@ -79,19 +86,33 @@ class _AquaSwitch(tk.Canvas):
         if self.command:
             self.command()
 
+    def _pill(self, x0, y0, x1, y1, color):
+        """«Таблетка»: два круга и прямоугольник между ними (штатные овалы Tk сглажены, многоугольники и толстые линии — нет)."""
+        h = y1 - y0
+        self.create_oval(x0, y0, x0 + h, y1, fill=color, outline="")
+        self.create_oval(x1 - h, y0, x1, y1, fill=color, outline="")
+        self.create_rectangle(x0 + h / 2, y0, x1 - h / 2, y1, fill=color, outline="")
+
     def redraw(self, pal: dict | None = None):
         self.pal = pal or self.pal
         p, on = self.pal, bool(self.var.get())
-        surface = p["card"] if self.surface == "card" else p["bg"]
-        self.configure(bg=surface, highlightbackground=surface, highlightcolor=p["accent"])      # рамка фокуса при навигации Tab
+        self.configure(bg=p["card"] if self.surface == "card" else p["bg"])
         self.delete("all")
-        h = self.H
+        m, w, h = self.M, self.W, self.H
         color = p["accent"] if on else p["off"]
-        self.create_oval(1, 1, h - 1, h - 1, fill=color, outline=color)
-        self.create_oval(self.W - h + 1, 1, self.W - 1, h - 1, fill=color, outline=color)
-        self.create_rectangle(h // 2, 1, self.W - h // 2, h - 1, fill=color, outline=color)
-        x = self.W - h + 2 if on else 2
-        self.create_oval(x, 2, x + h - 4, h - 2, fill="#ffffff", outline="#ffffff")
+        if self.focused:                                                       # кольцо фокуса при навигации Tab
+            self._pill(0, 0, w + 2 * m, h + 2 * m, p["accent"])
+            self._pill(m - 1, m - 1, m + w + 1, m + h + 1, self.cget("bg"))
+        self._pill(m, m, m + w, m + h, color)
+        d = h - 4                                                              # диаметр кнопки; поля вокруг по 2 пикселя
+        x = m + w - 2 - d if on else m + 2
+        y = m + 2
+        try:
+            shadow = _mix(self, color, "#000000", 0.35)
+        except tk.TclError:
+            shadow = "#555555"
+        self.create_oval(x - 0.5, y + 0.5, x + d + 0.5, y + d + 1.5, fill=shadow, outline="")      # мягкая тень под кнопкой
+        self.create_oval(x, y, x + d, y + d, fill="#ffffff", outline="")
 
 
 class _AquaPopupSelect(tk.Frame):

@@ -30,7 +30,7 @@ class PlatformWidgetsTest(unittest.TestCase):
             sel = widgets.PopupSelect(a, None, ["а", "б"])
             self.assertNotIsInstance(sw, ttk.Checkbutton)
             self.assertNotIsInstance(sel, ttk.Combobox)
-            self.assertEqual(int(sw.cget("highlightthickness")), 2)         # рамка фокуса при навигации Tab
+            self.assertTrue(int(sw.cget("takefocus")))                       # доступен с клавиатуры (Tab)
         finally:
             a.destroy()
 
