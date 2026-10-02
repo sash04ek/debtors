@@ -20,7 +20,7 @@ MAC_SCRIPT = r"""
 ObjC.import('AppKit'); ObjC.import('stdlib');
 function run(argv) {
   var initial = argv[0] || '', allowClear = argv[1] === '1', x = parseFloat(argv[2] || '400'), yBelow = parseFloat(argv[3] || '300'),
-      yAbove = parseFloat(argv[4] || '300'), auto = argv[5] || '', look = argv[6] || '', syncPath = argv[7] || '';
+      yAbove = parseFloat(argv[4] || '300'), auto = argv[5] || '', look = argv[6] || '', syncPath = argv[7] || '', parentPid = parseInt(argv[8] || '0', 10);
   var app = $.NSApplication.sharedApplication;
   app.setActivationPolicy($.NSApplicationActivationPolicyAccessory);
   var f = $.NSDateFormatter.alloc.init; f.dateFormat = 'yyyy-MM-dd';
@@ -40,7 +40,7 @@ function run(argv) {
   }});
   var panel = $.DPPanel.alloc.initWithContentRectStyleMaskBackingDefer($.NSMakeRect(x, screenH - y - H, W, H),
       $.NSWindowStyleMaskBorderless | $.NSWindowStyleMaskNonactivatingPanel, 2, false);
-  panel.becomesKeyOnlyIfNeeded = true; panel.floatingPanel = true;
+  panel.becomesKeyOnlyIfNeeded = true; panel.floatingPanel = true; panel.hidesOnDeactivate = false;
   if (look) panel.appearance = $.NSAppearance.appearanceNamed(look === 'dark' ? 'NSAppearanceNameDarkAqua' : 'NSAppearanceNameAqua');
   panel.opaque = false; panel.backgroundColor = $.NSColor.clearColor; panel.level = 3; panel.hasShadow = true;
   var fx = $.NSVisualEffectView.alloc.initWithFrame($.NSMakeRect(0, 0, W, H));
@@ -48,7 +48,7 @@ function run(argv) {
   panel.contentView = fx;
   picker.setFrameOrigin($.NSMakePoint(pad, pad + footer));
   fx.addSubview(picker);
-  var done = false;
+  var done = false, started = $.NSDate.date;
   function finish(r) {
     if (done) return; done = true;
     var out = $.NSString.alloc.initWithUTF8String(r + '\n');
@@ -63,6 +63,11 @@ function run(argv) {
       var s = $.NSString.stringWithContentsOfFileEncodingError(syncPath, $.NSUTF8StringEncoding, $());
       if (s && ObjC.unwrap(s)) { var d = f.dateFromString(ObjC.unwrap(s).trim()); if (d) picker.dateValue = d; }
     }},
+    'focus:': {types: ['void', ['id']], implementation: function (t) {        // вспомогательный процесс при запуске активируется сам —
+      if ($.NSDate.date.timeIntervalSinceDate(started) > 1.8) { t.invalidate; return; }   // возвращаем активность программе-хозяину
+      var parent = parentPid ? $.NSRunningApplication.runningApplicationWithProcessIdentifier(parentPid) : null;
+      if (parent && !parent.active) parent.activateWithOptions($.NSApplicationActivateIgnoringOtherApps);
+    }},
     'auto:': {types: ['void', ['id']], implementation: function (t) {         // только для автоматической проверки
       finish(auto === 'clear' ? 'CLEAR' : 'OK:' + ObjC.unwrap(f.stringFromDate(picker.dateValue)));
     }}
@@ -71,6 +76,7 @@ function run(argv) {
   picker.target = tgt; picker.action = 'picked:';
   var modes = $.NSRunLoopCommonModes;
   $.NSRunLoop.mainRunLoop.addTimerForMode($.NSTimer.timerWithTimeIntervalTargetSelectorUserInfoRepeats(0.15, tgt, 'sync:', $(), true), modes);
+  $.NSRunLoop.mainRunLoop.addTimerForMode($.NSTimer.timerWithTimeIntervalTargetSelectorUserInfoRepeats(0.05, tgt, 'focus:', $(), true), modes);
   if (allowClear) {
     var b = $.NSButton.alloc.initWithFrame($.NSMakeRect(pad, 6, W - 2 * pad, 22));
     b.title = 'Очистить'; b.bezelStyle = 1; b.controlSize = 1; b.font = $.NSFont.systemFontOfSize(11); b.target = tgt; b.action = 'cleared:';
@@ -154,14 +160,14 @@ def windows_script(initial: str, allow_clear: bool, x: int, y: int, sync_path: s
 
 
 def build_command(initial: str, allow_clear: bool, x: int = 0, y: int = 0, platform: str | None = None, auto: str = "",
-                  y_above: int | None = None, look: str = "", sync_path: str = "") -> tuple[list[str], dict]:
+                  y_above: int | None = None, look: str = "", sync_path: str = "", parent_pid: int = 0) -> tuple[list[str], dict]:
     """Команда запуска вспомогательного процесса для текущей (или заданной) платформы и параметры Popen.
     x, y — экранные координаты левого верхнего угла панели (под полем), y_above — верх поля (если снизу не помещается)."""
     platform = platform or sys.platform
     if platform == "darwin":
         above = y if y_above is None else y_above
         return (["osascript", "-l", "JavaScript", "-e", MAC_SCRIPT, initial, "1" if allow_clear else "0", str(int(x)), str(int(y)),
-                 str(int(above)), auto, look, sync_path], {})
+                 str(int(above)), auto, look, sync_path, str(int(parent_pid))], {})
     if platform.startswith("win"):
         encoded = base64.b64encode(windows_script(initial, allow_clear, x, y, sync_path).encode("utf-16-le")).decode("ascii")
         return (["powershell", "-NoProfile", "-NonInteractive", "-STA", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
@@ -220,7 +226,7 @@ def ask(widget, current: date | None, allow_clear: bool, on_result, x: int = 0, 
     pending = Pending(None, sync_path)
     try:
         cmd, kwargs = build_command(current.strftime("%Y-%m-%d") if current else "", allow_clear, x, y, auto=auto,
-                                    y_above=y_above, look=look, sync_path=sync_path)
+                                    y_above=y_above, look=look, sync_path=sync_path, parent_pid=os.getpid())
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", **kwargs)
     except OSError:
         pending._cleanup()

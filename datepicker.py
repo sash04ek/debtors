@@ -285,7 +285,10 @@ class DateEntry(ttk.Frame):
 
     def _focus_out(self, _event=None) -> None:
         self.tidy()
-        if time.monotonic() - self._opened_at > 0.4:           # сразу после показа окно календаря может на миг отнять фокус
+        since_open = time.monotonic() - self._opened_at
+        if self._native is not None and since_open < 2.5 and self.entry.focus_displayof() is None:
+            return                                             # вспомогательный процесс при запуске на миг активируется сам: это не уход фокуса
+        if since_open > 0.4:                                   # сразу после показа окно календаря может на миг отнять фокус
             self.close_calendar()
 
     def _escape(self, _event=None):

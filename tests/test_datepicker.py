@@ -169,9 +169,11 @@ class NativeTest(unittest.TestCase):
     def test_commands_per_platform(self):
         import base64
         import native_date as nd
-        cmd, kw = nd.build_command("2026-10-09", True, 100, 200, platform="darwin", y_above=180, look="dark", sync_path="/tmp/s.txt")
+        cmd, kw = nd.build_command("2026-10-09", True, 100, 200, platform="darwin", y_above=180, look="dark", sync_path="/tmp/s.txt",
+                                   parent_pid=4242)
         self.assertEqual(cmd[:4], ["osascript", "-l", "JavaScript", "-e"])
-        self.assertEqual(cmd[5:], ["2026-10-09", "1", "100", "200", "180", "", "dark", "/tmp/s.txt"])
+        self.assertEqual(cmd[5:], ["2026-10-09", "1", "100", "200", "180", "", "dark", "/tmp/s.txt", "4242"])
+        self.assertIn("activateWithOptions", cmd[4])                       # процесс-помощник возвращает активность программе
         self.assertIn("NSDatePicker", cmd[4])
         self.assertIn("NSWindowStyleMaskNonactivatingPanel", cmd[4])      # панель не забирает фокус
         cmd, kw = nd.build_command("", False, 100, 200, platform="win32", sync_path="C:\\Temp\\s'.txt")
@@ -265,6 +267,33 @@ class NativeTest(unittest.TestCase):
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=30, **kw).stdout
         os.unlink(path)
         self.assertEqual(nd.parse_output(out), ("pick", date(2026, 12, 25)))
+
+    @unittest.skipUnless(__import__("os").environ.get("DEBTORS_NATIVE_E2E") == "1" and sys.platform == "darwin",
+                         "ручная проверка: DEBTORS_NATIVE_E2E=1, откроет панель macOS на пару секунд")
+    def test_macos_focus_stays_in_field_while_panel_is_open(self):
+        import native_date as nd
+        root = tk.Tk()
+        root.geometry("500x400+60+80")
+        root.update()
+        root.lift()
+        w = dp.DateEntry(root, tk.StringVar(value="09.10.2026"))
+        w.pack(pady=20)
+        root.update()
+        w.entry.focus_force()
+        root.update()
+        seen = {}
+        orig = nd.ask
+        nd.ask = lambda *a, **k: orig(*a, **{**k, "auto": "ok"})          # панель сама закроется через ~1,2 с
+        try:
+            w.open_calendar()
+            root.after(900, lambda: seen.update(focus=root.focus_get(), open=w.is_open()))
+            root.after(2500, root.quit)
+            root.mainloop()
+        finally:
+            nd.ask = orig
+            root.destroy()
+        self.assertIs(seen["focus"], w.entry)                               # фокус остался в поле
+        self.assertTrue(seen["open"])                                       # а календарь при этом показан
 
 
 if __name__ == "__main__":
