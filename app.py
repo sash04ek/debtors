@@ -535,6 +535,7 @@ class App(tk.Tk):
         self.only_managed = tk.BooleanVar(value=self.settings.only_managed)
         self.duty_auto = tk.BooleanVar(value=self.settings.duty_auto)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
+        self.auto_filter_var = tk.BooleanVar(value=self.settings.auto_filter)
         self.font_var = tk.StringVar(value=FONT_LABELS.get(self.settings.table_font, FONT_LABELS["normal"]))
         self.theme_var = tk.StringVar(value=THEME_LABELS.get(self.settings.theme, THEME_LABELS["system"]))
         self.sort_options = [SORT_DEBT_LABEL]                       # «Сумма долга» + колонки файла (заполняется при загрузке листа)
@@ -842,7 +843,16 @@ class App(tk.Tk):
         self.sheet_cb.set(chosen)
         self.load_sheet(chosen)
         self.add_recent(path)
+        if not quiet and not self._restoring:
+            self.auto_filter()
         return True
+
+    def auto_filter(self):
+        """Включена настройка «Фильтровать при открытии файла» — сразу фильтруем только что открытый исходный отчёт.
+        Если колонки ещё не выбраны, ничего не делаем (без окон): список просто загружен."""
+        s = self.collect_settings()
+        if s.auto_filter and self.kind == "original" and self.sheet and s.name_col and s.debt_col:
+            self.run()
 
     def open_filtered(self, path: Path, quiet: bool = False) -> bool:
         """Открывает отфильтрованный список, сохранённый программой: он сразу становится результатом
@@ -996,6 +1006,15 @@ class App(tk.Tk):
         finally:
             self._restoring = False
             self.save_state()
+
+    def destroy(self):
+        job = getattr(self, "_search_job", None)
+        if job:
+            try:
+                self.after_cancel(job)                               # отложенный поиск не должен сработать в закрытом окне
+            except Exception:
+                pass
+        super().destroy()
 
     def on_close(self):
         self.save_state()
@@ -1532,6 +1551,7 @@ class App(tk.Tk):
         s.only_managed = self.only_managed.get()
         s.duty_auto = self.duty_auto.get()
         s.restore_state = self.restore_var.get()
+        s.auto_filter = self.auto_filter_var.get()
         s.table_font = next((k for k, v in FONT_LABELS.items() if v == self.font_var.get()), "normal")
         s.theme = next((k for k, v in THEME_LABELS.items() if v == self.theme_var.get()), "system")
         s.sort_col = None if self.sort_var.get() in ("", SORT_DEBT_LABEL) else self.sort_var.get()
@@ -1893,6 +1913,7 @@ class SettingsDialog(Dialog):
         widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
         widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
         widgets.Switch(rules.row("Только дома в управлении"), app.only_managed).pack()
+        widgets.Switch(rules.row("Фильтровать при открытии файла"), app.auto_filter_var).pack()
         widgets.Switch(rules.row("Запоминать состояние при запуске"), app.restore_var).pack()
         widgets.PopupSelect(rules.row("Сортировать по"), app.sort_var, app.sort_options).pack()
         widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()
