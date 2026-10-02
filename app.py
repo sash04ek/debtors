@@ -1069,7 +1069,9 @@ class App(tk.Tk):
         key = "⌘" if mac else "Ctrl+"
         bar = tk.Menu(self)
         if mac:
-            bar.add_cascade(menu=tk.Menu(bar, name="apple", tearoff=0))              # меню приложения
+            apple = tk.Menu(bar, name="apple", tearoff=0)                              # меню приложения
+            apple.add_command(label="О программе «Должники»", command=self.show_about)  # «Настройки…», «Скрыть», «Завершить» добавляет система
+            bar.add_cascade(menu=apple)
             self.createcommand("tkAboutDialog", self.show_about)
             self.createcommand("::tk::mac::ShowPreferences", self.open_settings)
         file = tk.Menu(bar, tearoff=0)

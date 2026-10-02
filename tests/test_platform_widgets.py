@@ -44,6 +44,8 @@ class PlatformWidgetsTest(unittest.TestCase):
                       if bar.type(i) == "cascade" and bar.entrycget(i, "label")]
             self.assertEqual(labels, ["Файл", "Правка"])
             idx = next(i for i in range(bar.index("end") + 1) if bar.type(i) == "cascade" and bar.entrycget(i, "label") == "Файл")
+            apple = bar.nametowidget(bar.entrycget(0, "menu"))
+            self.assertEqual(apple.entrycget(0, "label"), "О программе «Должники»")      # стандартный пункт About в меню приложения
             file_menu = bar.nametowidget(bar.entrycget(idx, "menu"))
             self.assertEqual(file_menu.entrycget(0, "label"), "Открыть Excel…")
         finally:
