@@ -32,7 +32,7 @@ BODY_NO_AGENT = """По состоянию на **{date} г.** перед {org} 
 LETTER_BODY = "\tПрошу Вас в срок до {date} предоставить сведения по начислению и оплате предоставляемых услуг для направления в суд, по адресам:"
 LETTER_TO = "**Директору ООО «ЕИРЦ»**\n**Полиенко С. А.**\n347900, г. Таганрог, пер. Комсомольский 21"
 LETTER_FIELDS = ("letter_header", "letter_to", "letter_body", "sign_role", "sign_name", "city", "letter_days")
-COURT_FIELDS = ("applicant_address", "region", "city_in", "duty_default", "license_text", "poa_text")
+COURT_FIELDS = ("applicant_address", "region", "city_in", "license_text", "poa_text")
 
 @dataclass
 class Organization:
@@ -57,7 +57,6 @@ class Organization:
     applicant_address: str = ""        # адрес заявителя в заявлении
     region: str = "Ростовская область"
     city_in: str = "г. Таганроге"      # «в г. Таганроге» (для текста заявления)
-    duty_default: str = "200"          # госпошлина по умолчанию, руб.
     license_text: str = ""             # «№ 679 от 18.05.2021» — уведомление о предоставлении лицензии
     poa_text: str = ""                 # «23.08.2022г.» — дата доверенности представителя
 

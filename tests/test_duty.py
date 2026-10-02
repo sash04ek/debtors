@@ -42,7 +42,7 @@ class DutyScaleTest(unittest.TestCase):
 
 class ApplicationDutyTest(unittest.TestCase):
     def _text(self, card, duty_value):
-        org = orgs.Organization(name="О", match="О", duty_default="200", city="г. Таганрог", region="Ростовская область")
+        org = orgs.Organization(name="О", match="О", city="г. Таганрог", region="Ростовская область")
         case = court.Case(owners.Owner(fio="Иванов Иван Иванович"), [owners.Owner(fio="Иванов Иван Иванович")], 1000.0, None)
         with tempfile.TemporaryDirectory() as d:
             p = Path(d) / "z.docx"
@@ -53,7 +53,7 @@ class ApplicationDutyTest(unittest.TestCase):
         base = dict(address="ул. Т, д. 1", flat="5")
         self.assertIn("3 160,22", self._text(owners.Card(**base), 3160.22).replace(" ", " "))         # расчёт
         self.assertIn("999", self._text(owners.Card(duty="999", **base), 3160.22))                           # карточка главнее
-        self.assertIn("200", self._text(owners.Card(**base), None))                                          # значение организации
+        self.assertIn("________", self._text(owners.Card(**base), None))                                     # нет расчёта — пустое место
 
 
 if __name__ == "__main__":
