@@ -1905,8 +1905,12 @@ class SettingsDialog(Dialog):
         ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
 
         cf = widgets.section(right, "Судебные участки")
-        self.regions = tk.StringVar(value=courtsmod.load()["regions"])
-        ttk.Entry(cf.row("Коды регионов"), textvariable=self.regions, width=14).pack()
+        self.regions = tk.StringVar(value=courtsmod.load()["regions"])                  # код(ы) региона — именно он хранится
+        self.region_var = tk.StringVar(value=courtsmod.regions_label(self.regions.get()))   # подпись «Название (код)» в списке
+        options = courtsmod.region_options()
+        if self.region_var.get() not in options:                                          # прежнее значение из нескольких регионов
+            options = [self.region_var.get()] + options
+        widgets.PopupSelect(cf.row("Регион"), self.region_var, options, command=self.region_chosen).pack()
         loaded = cf.row("Загружено")
         self.courts_lbl = tk.Label(loaded, text="", bd=0)
         self.courts_lbl.role = "muted"
@@ -1979,6 +1983,12 @@ class SettingsDialog(Dialog):
             messagebox.showinfo("Судебные участки", "Сначала загрузите список участков кнопкой слева.", parent=self)
             return
         CourtsEditorDialog(self)
+
+    def region_chosen(self):
+        """Выбран регион: запоминаем его код сразу."""
+        code = courtsmod.code_from_label(self.region_var.get(), self.regions.get())
+        self.regions.set(code)
+        courtsmod.set_regions(code)
 
     def load_courts(self):
         """Загружает публичный список участков мировых судей с sudrf.ru (без ваших данных)."""

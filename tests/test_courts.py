@@ -1,5 +1,6 @@
 """Список судебных участков: python -m unittest discover tests"""
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -88,3 +89,36 @@ class OverridesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegionSelectTest(unittest.TestCase):
+    def setUp(self):
+        self.old = C.COURTS_PATH
+        C.COURTS_PATH = Path(tempfile.mkdtemp()) / "courts.json"
+
+    def tearDown(self):
+        C.COURTS_PATH = self.old
+
+    def test_labels_show_name_but_value_is_code(self):
+        self.assertEqual(C.region_label("61"), "Ростовская область (61)")
+        self.assertEqual(C.region_label("5"), "Республика Дагестан (05)")
+        self.assertEqual(C.code_from_label("Ростовская область (61)"), "61")
+        self.assertIn("Ростовская область (61)", C.region_options())
+
+    def test_legacy_several_regions_keep_their_codes(self):
+        label = C.regions_label("61, 23")
+        self.assertEqual(label, "Ростовская область (61), Краснодарский край (23)")
+        self.assertEqual(C.code_from_label(label, "61, 23"), "61, 23")
+        self.assertEqual(C.code_from_label("Краснодарский край (23)", "61, 23"), "23")
+
+    def test_choice_is_remembered_without_losing_other_data(self):
+        C.save("61", [C.Court("61MS0001", "Участок № 1", "адрес")], last="61MS0001")
+        C.set_regions("23")
+        d = C.load()
+        self.assertEqual(d["regions"], "23")
+        self.assertEqual(len(d["courts"]), 1)
+        self.assertEqual(d["last"], "61MS0001")
+
+    def test_all_codes_are_two_digits_and_names_unique(self):
+        self.assertTrue(all(len(c) == 2 and c.isdigit() for c in C.REGIONS))
+        self.assertEqual(len(set(C.REGIONS.values())), len(C.REGIONS))
