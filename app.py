@@ -1878,10 +1878,7 @@ class SettingsDialog(Dialog):
         for key, text in COLUMN_FIELDS.items():
             widgets.PopupSelect(cols.row(text), app.col_vars[key], app.col_options[key] or [""]).pack()
 
-        orgs = widgets.section(right, "Организации", pady=(8, 0))
-        ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
-
-        rules = widgets.section(right, "Отбор")
+        rules = widgets.section(right, "Отбор", pady=(8, 0))
         ttk.Spinbox(rules.row("Показать должников"), from_=1, to=100000, textvariable=app.top_n, width=7).pack()
         widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
         widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
@@ -1903,6 +1900,9 @@ class SettingsDialog(Dialog):
         dty = widgets.section(left, "Госпошлина")
         widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
         ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
+
+        orgs = widgets.section(left, "Организации")
+        ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
         cf = widgets.section(right, "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])
