@@ -279,7 +279,7 @@ class Dialog(tk.Toplevel):
         super().__init__(*args, **kwargs)
         self.withdraw()
         self._transient_master = None
-        self.after(150, self._ensure_shown)                    # страховка, если окно не вызывает center_over (idle-обработчик сработал бы слишком рано)
+        self._show_job = self.after(150, self._ensure_shown)   # страховка, если окно не вызывает center_over (idle-обработчик сработал бы слишком рано)
 
     def geometry(self, newGeometry=None):
         """Запоминает заданный размер: у скрытого окна winfo_width() ещё 1, а center_over нужен настоящий размер."""
@@ -304,6 +304,13 @@ class Dialog(tk.Toplevel):
 
     def _ensure_shown(self):
         self.show()
+
+    def destroy(self):
+        try:
+            self.after_cancel(self._show_job)
+        except Exception:
+            pass
+        super().destroy()
 
 
 def center_over(win: tk.Misc, parent: tk.Misc) -> None:
@@ -2007,7 +2014,10 @@ class SettingsDialog(Dialog):
             self.config(cursor="")
         courtsmod.save(self.regions.get().strip(), courts_list, courtsmod.load()["last"])
         self.show_courts_info()
-        messagebox.showinfo("Судебные участки", f"Загружено участков: {len(courts_list)}.", parent=self)
+        missing = courtsmod.missing_regions(courts_list, self.regions.get())
+        note = ("\n\nВ списке sudrf.ru нет участков для: " + "; ".join(missing) + ". Для них участки нужно будет добавить другим способом.") \
+            if missing else ""
+        messagebox.showinfo("Судебные участки", f"Загружено участков: {len(courts_list)}.{note}", parent=self)
 
     def close(self):
         save_settings(self.app.collect_settings())
@@ -2416,7 +2426,7 @@ class RegionsDialog(Dialog):
         self.transient(parent)
         if _is_mac(parent.app):
             set_window_appearance(parent.app, self, parent.app.settings.theme)
-        self.chosen = set(courtsmod.region_codes(parent.regions.get()))
+        self.chosen = {c for c in courtsmod.region_codes(parent.regions.get()) if c in courtsmod.REGIONS}
         self.codes = sorted(courtsmod.REGIONS, key=lambda c: courtsmod.REGIONS[c])
         self.shown: list[str] = []
         body = ttk.Frame(self, padding=14)
@@ -2431,7 +2441,7 @@ class RegionsDialog(Dialog):
         box = ttk.Frame(body)
         box.pack(fill="both", expand=True, pady=8)
         self.tree = ttk.Treeview(box, columns=("mark", "name", "code"), show="headings", height=14, selectmode="browse")
-        for c, text, w, anchor in (("mark", "", 34, "center"), ("name", "Регион", 380, "w"), ("code", "Код", 60, "center")):
+        for c, text, w, anchor in (("mark", "", 34, "center"), ("name", "Регион", 380, "w"), ("code", "Код", 90, "center")):
             self.tree.heading(c, text=text)
             self.tree.column(c, width=w, anchor=anchor, stretch=c == "name")
         sb = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
@@ -2452,17 +2462,21 @@ class RegionsDialog(Dialog):
         center_over(self, parent)
         entry.focus_set()
 
+    @staticmethod
+    def _codes_text(code: str) -> str:
+        return ", ".join([code] + courtsmod.ALT_CODES.get(code, []))
+
     def refresh(self):
         q = self.query.get().strip().lower()
-        self.shown = [c for c in self.codes if not q or q in courtsmod.REGIONS[c].lower() or q in c]
+        self.shown = [c for c in self.codes if not q or q in courtsmod.REGIONS[c].lower() or q in self._codes_text(c)]
         self.tree.delete(*self.tree.get_children())
         for c in self.shown:
-            self.tree.insert("", "end", iid=c, values=("☑" if c in self.chosen else "☐", courtsmod.REGIONS[c], c))
+            self.tree.insert("", "end", iid=c, values=("☑" if c in self.chosen else "☐", courtsmod.REGIONS[c], self._codes_text(c)))
         self.count_lbl.config(text=f"Выбрано регионов: {len(self.chosen)}")
 
     def _toggle(self, code: str):
         self.chosen.symmetric_difference_update({code})
-        self.tree.item(code, values=("☑" if code in self.chosen else "☐", courtsmod.REGIONS[code], code))
+        self.tree.item(code, values=("☑" if code in self.chosen else "☐", courtsmod.REGIONS[code], self._codes_text(code)))
         self.count_lbl.config(text=f"Выбрано регионов: {len(self.chosen)}")
 
     def on_click(self, event):
@@ -2484,7 +2498,7 @@ class RegionsDialog(Dialog):
         if not self.chosen:
             messagebox.showinfo("Регионы", "Выберите хотя бы один регион.", parent=self)
             return
-        self.parent_dlg.regions_chosen(sorted(self.chosen))
+        self.parent_dlg.regions_chosen(courtsmod.codes_with_alternates(sorted(self.chosen)))
         self.destroy()
 
 

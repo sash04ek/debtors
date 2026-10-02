@@ -42,13 +42,46 @@ REGIONS = {
     "74": "Челябинская область", "75": "Забайкальский край", "76": "Ярославская область", "77": "Москва",
     "79": "Еврейская автономная область", "86": "Ханты-Мансийский автономный округ — Югра",
     "87": "Чукотский автономный округ", "89": "Ямало-Ненецкий автономный округ",
+    # Новые регионы. В публичном списке sudrf.ru участков этих регионов нет (см. missing_regions): коды заданы вручную
+    "82": "Республика Крым", "92": "Севастополь", "80": "Донецкая Народная Республика",
+    "81": "Луганская Народная Республика", "84": "Херсонская область", "85": "Запорожская область",
 }
+# Дополнительные коды региона (выбор региона включает и их).
+ALT_CODES = {"82": ["182"], "80": ["180"], "81": ["181"], "84": ["184"], "85": ["185"]}
 
 
 def region_label(code: str) -> str:
     """«61» -> «Ростовская область (61)»; неизвестный код показывается как есть."""
     code = code.strip().zfill(2)
     return f"{REGIONS[code]} ({code})" if code in REGIONS else code
+
+
+def codes_with_alternates(primary: list[str]) -> list[str]:
+    """Основные коды регионов вместе с их дополнительными кодами: ["82"] -> ["82", "182"]."""
+    out = []
+    for c in primary:
+        for x in [c] + ALT_CODES.get(c, []):
+            if x not in out:
+                out.append(x)
+    return out
+
+
+def _prefix(code: str) -> str:
+    """Числовая часть кода участка до букв: «61MS0203» -> «61», «182MS0001» -> «182»."""
+    m = re.match(r"\d+", code)
+    return m.group(0) if m else code[:2]
+
+
+def missing_regions(courts: list, regions: str) -> list[str]:
+    """Выбранные регионы, для которых в загруженном списке нет ни одного участка (подписи «Название (код)»)."""
+    have = {_prefix(c.code) for c in courts}
+    out = []
+    for c in region_codes(regions):
+        if c not in REGIONS:
+            continue                                   # дополнительные и неизвестные коды отдельно не проверяем
+        if not ({c} | set(ALT_CODES.get(c, []))) & have:
+            out.append(region_label(c))
+    return out
 
 
 def region_codes(regions: str) -> list[str]:
@@ -135,10 +168,11 @@ def download(regions: str = DEFAULT_REGIONS, urlopen=_default_urlopen) -> list[C
         raise DownloadError("Сайт sudrf.ru ответил в неожиданном формате — список участков не удалось разобрать.")
     wanted = {r.strip().zfill(2) for r in re.split(r"[,\s;]+", regions) if r.strip()}
     if wanted:
-        courts = [c for c in courts if c.code[:2] in wanted]
+        courts = [c for c in courts if _prefix(c.code) in wanted]
     if not courts:
-        raise DownloadError("Для указанных регионов участков не найдено. Проверьте выбранный регион.")
-    return sorted(courts, key=lambda c: (c.code[:2], _sort_key(c.name)))
+        raise DownloadError("В списке sudrf.ru нет участков для выбранных регионов: "
+                            + "; ".join(region_label(c) for c in region_codes(regions) if c in REGIONS) + ".")
+    return sorted(courts, key=lambda c: (_prefix(c.code).zfill(3), _sort_key(c.name)))
 
 
 def _sort_key(name: str):

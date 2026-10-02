@@ -124,3 +124,45 @@ class RegionSelectTest(unittest.TestCase):
     def test_all_codes_are_two_digits_and_names_unique(self):
         self.assertTrue(all(len(c) == 2 and c.isdigit() for c in C.REGIONS))
         self.assertEqual(len(set(C.REGIONS.values())), len(C.REGIONS))
+
+
+class NewRegionsTest(unittest.TestCase):
+    def test_new_regions_are_listed_with_alternate_codes(self):
+        self.assertEqual(C.REGIONS["82"], "Республика Крым")
+        self.assertEqual(C.REGIONS["92"], "Севастополь")
+        self.assertEqual(C.codes_with_alternates(["82", "61", "92"]), ["82", "182", "61", "92"])
+        self.assertEqual(C.codes_with_alternates(["80", "81", "84", "85"]),
+                         ["80", "180", "81", "181", "84", "184", "85", "185"])
+
+    def test_download_matches_three_digit_prefix_and_reports_missing(self):
+        feed = ("balloons_user['182MS0001'][balloons_user['182MS0001'].length]="
+                "{type:'mir',name:'Участок 1 Симферополь',adress:'адрес 1',coord:[0,0]};"
+                "balloons_user['61MS0001'][balloons_user['61MS0001'].length]="
+                "{type:'mir',name:'Участок 1 Ростов',adress:'адрес 2',coord:[0,0]};")
+
+        class Resp:
+            def read(self):
+                return feed.encode("cp1251")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        got = C.download("82, 182, 61, 92", urlopen=lambda url: Resp())
+        self.assertEqual(sorted(c.code for c in got), ["182MS0001", "61MS0001"])
+        self.assertEqual(C.missing_regions(got, "82, 182, 61, 92"), ["Севастополь (92)"])
+
+    def test_only_missing_regions_gives_clear_error(self):
+        class Resp:
+            def read(self):
+                return b"balloons_user['61MS0001'][balloons_user['61MS0001'].length]={type:'mir',name:'x',adress:'y',coord:["
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        with self.assertRaises(C.DownloadError) as cm:
+            C.download("92", urlopen=lambda url: Resp())
+        self.assertIn("Севастополь (92)", str(cm.exception))
