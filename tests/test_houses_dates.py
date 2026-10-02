@@ -118,3 +118,42 @@ class HousesEditorTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HousesZebraTest(unittest.TestCase):
+    def setUp(self):
+        self.old = app.save_settings
+        app.save_settings = lambda s: None
+        app.App.restore_last_state = lambda self: None
+        self.a = app.App()
+        self.a.update()
+
+    def tearDown(self):
+        self.a.destroy()
+        app.save_settings = self.old
+
+    def _tags(self, ed):
+        return [bool(ed.tree.item(i, "tags")) for i in ed.tree.get_children()]
+
+    def test_rows_alternate_like_the_debtors_table(self):
+        ed = app.HousesEditor(self.a, self.a)
+        ed.set([{"address": f"Д {n}", "since": "", "until": "", "left": False, "court": ""} for n in range(5)])
+        self.assertEqual(self._tags(ed), [False, True, False, True, False])
+        self.assertEqual(str(ed.tree.tag_configure("odd", "background")), self.a.stripe_color)       # тот же цвет, что в таблице должников
+
+    def test_stripes_survive_add_and_delete(self):
+        ed = app.HousesEditor(self.a, self.a)
+        ed.set([{"address": f"Д {n}", "since": "", "until": "", "left": False, "court": ""} for n in range(4)])
+        ed.addr.set("Новый")
+        ed.upsert()
+        self.assertEqual(self._tags(ed), [False, True, False, True, False])
+        ed.tree.selection_set(ed.tree.get_children()[1])
+        ed.remove()
+        self.assertEqual(self._tags(ed), [False, True, False, True])
+
+    def test_theme_change_updates_color_in_open_table(self):
+        ed = app.HousesEditor(self.a, self.a)
+        ed.set([{"address": "Д 1", "since": "", "until": "", "left": False, "court": ""}])
+        ed.tree.tag_configure("odd", background="#123456")              # «старый» цвет прежней темы
+        app.apply_palette(self.a)
+        self.assertEqual(str(ed.tree.tag_configure("odd", "background")), self.a.stripe_color)

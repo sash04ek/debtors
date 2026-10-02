@@ -465,6 +465,28 @@ def apply_palette(root: tk.Misc) -> None:
     tree = getattr(root, "tree", None)
     if tree is not None:
         tree.tag_configure("odd", background=stripe)              # чередование строк, как в Finder
+    for t in list(getattr(root, "striped_trees", [])):            # и в других таблицах (например, список домов)
+        try:
+            t.tag_configure("odd", background=stripe)
+        except tk.TclError:
+            root.striped_trees.remove(t)                          # таблицу уже закрыли
+
+
+def stripe_rows(tree: ttk.Treeview) -> None:
+    """Чередование цвета строк таблицы, как в таблице должников: нечётные строки чуть темнее/светлее. Вызывается после любого
+    изменения набора строк."""
+    for i, item in enumerate(tree.get_children()):
+        tree.item(item, tags=("odd",) if i % 2 else ())
+
+
+def make_striped(tree: ttk.Treeview) -> None:
+    """Включает чередование для таблицы: цвет берётся из темы и обновляется при её смене."""
+    root = tree.nametowidget(".")
+    tree.tag_configure("odd", background=getattr(root, "stripe_color", "#f4f5f5"))
+    if not hasattr(root, "striped_trees"):
+        root.striped_trees = []
+    root.striped_trees.append(tree)
+    stripe_rows(tree)
 
 
 class App(tk.Tk):
@@ -3234,6 +3256,7 @@ class HousesEditor(ttk.Frame):
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="left", fill="y")
+        make_striped(self.tree)                         # чередование строк, как в таблице должников
         self.tree.bind("<<TreeviewSelect>>", lambda e: self.load_selected())
         self.tree.bind("<Delete>", lambda e: self.remove())
         self.tree.bind("<BackSpace>", lambda e: self.remove())
@@ -3299,6 +3322,7 @@ class HousesEditor(ttk.Frame):
         item = self.tree.insert("", "end", values=(address, since, self._until_text(until, left), self._court_label(code)))
         self.codes[item] = code
         self.meta[item] = {"until": until, "left": left}
+        stripe_rows(self.tree)
         return item
 
     def _set_court(self, item: str, code: str):
@@ -3394,6 +3418,7 @@ class HousesEditor(ttk.Frame):
             self.codes.pop(i, None)
             self.meta.pop(i, None)
             self.tree.delete(i)
+        stripe_rows(self.tree)
         self._clear_fields()
         self.del_btn.config(text="Удалить")
 
