@@ -17,6 +17,7 @@ import claim
 import core
 import court
 import datepicker
+import native_date
 import duty
 import courts as courtsmod
 import orgs as orgmod
@@ -558,6 +559,8 @@ class App(tk.Tk):
         self.duty_auto = tk.BooleanVar(value=self.settings.duty_auto)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
         self.auto_filter_var = tk.BooleanVar(value=self.settings.auto_filter)
+        self.native_date_var = tk.BooleanVar(value=self.settings.native_datepicker)
+        datepicker.USE_NATIVE = self.settings.native_datepicker
         self.font_var = tk.StringVar(value=FONT_LABELS.get(self.settings.table_font, FONT_LABELS["normal"]))
         self.theme_var = tk.StringVar(value=THEME_LABELS.get(self.settings.theme, THEME_LABELS["system"]))
         self.sort_options = [SORT_DEBT_LABEL]                       # «Сумма долга» + колонки файла (заполняется при загрузке листа)
@@ -1635,6 +1638,8 @@ class App(tk.Tk):
         s.duty_auto = self.duty_auto.get()
         s.restore_state = self.restore_var.get()
         s.auto_filter = self.auto_filter_var.get()
+        s.native_datepicker = self.native_date_var.get()
+        datepicker.USE_NATIVE = s.native_datepicker
         s.table_font = next((k for k, v in FONT_LABELS.items() if v == self.font_var.get()), "normal")
         s.theme = next((k for k, v in THEME_LABELS.items() if v == self.theme_var.get()), "system")
         s.sort_col = None if self.sort_var.get() in ("", SORT_DEBT_LABEL) else self.sort_var.get()
@@ -2003,6 +2008,8 @@ class SettingsDialog(Dialog):
         widgets.PopupSelect(look.row("Тема"), app.theme_var, list(THEME_LABELS.values()), command=app.change_theme).pack()
         widgets.PopupSelect(look.row("Шрифт таблицы"), app.font_var, list(FONT_LABELS.values()),
                             command=app.change_table_font).pack()
+        if native_date.available():
+            widgets.Switch(look.row("Системный календарь"), app.native_date_var, command=app.save_settings_now).pack()
 
         dty = widgets.section(left, "Госпошлина")
         widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
@@ -2994,7 +3001,7 @@ class OwnerDialog(Dialog):
             row = ttk.Frame(obox)
             row.pack(fill="x", pady=(0, 4))
             if key in self.DATE_KEYS:
-                datepicker.DateEntry(row, var).pack(side="left")
+                datepicker.DateEntry(row, var, title=label).pack(side="left")
             else:
                 ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
             if key == "fio":
@@ -3020,7 +3027,7 @@ class OwnerDialog(Dialog):
                 var = tk.StringVar(value=getattr(self.card, key))
                 self.vars[key] = var
                 if key in self.DATE_KEYS:
-                    datepicker.DateEntry(box, var).pack(anchor="w", pady=(0, 4))
+                    datepicker.DateEntry(box, var, title=label).pack(anchor="w", pady=(0, 4))
                 else:
                     ttk.Entry(box, textvariable=var).pack(fill="x", pady=(0, 4))
         self.house_box = ttk.LabelFrame(form, text="Дом", padding=8)
@@ -3246,10 +3253,10 @@ class HousesEditor(ttk.Frame):
         drow = ttk.Frame(self)
         drow.pack(fill="x", pady=(6, 0))
         ttk.Label(drow, text="В управлении с:").pack(side="left")
-        self.since_entry = datepicker.DateEntry(drow, self.since)
+        self.since_entry = datepicker.DateEntry(drow, self.since, title="В управлении с (дата прихода)")
         self.since_entry.pack(side="left", padx=(6, 14))
         ttk.Label(drow, text="Ушёл (по):").pack(side="left")
-        self.until_entry = datepicker.DateEntry(drow, self.until)
+        self.until_entry = datepicker.DateEntry(drow, self.until, title="Дом ушёл (дата ухода)")
         self.until_entry.pack(side="left", padx=(6, 14))
         ttk.Checkbutton(drow, text="Ушёл, дата неизвестна", variable=self.left, command=self._left_toggled).pack(side="left")
 
@@ -3516,7 +3523,7 @@ class OrgDialog(Dialog):
         ):
             ttk.Label(h, text=label).pack(anchor="w")
             if key == "poa_text":
-                datepicker.DateEntry(h, self.c_vars[key], suffix="г.").pack(anchor="w", pady=(0, 4))     # «23.08.2022г.»
+                datepicker.DateEntry(h, self.c_vars[key], suffix="г.", title="Дата доверенности").pack(anchor="w", pady=(0, 4))     # «23.08.2022г.»
             else:
                 ttk.Entry(h, textvariable=self.c_vars[key]).pack(fill="x", pady=(0, 4))
         ttk.Label(h, text="Шапка заявления берётся со вкладки «Шапка»; подписант — со вкладки «Письмо в ЕИРЦ». Судебный участок закрепляется за домом на вкладке «Дома» или выбирается в карточке помещения и при формировании заявлений.",

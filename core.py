@@ -59,6 +59,7 @@ class Settings:
     duty_auto: bool = True              # госпошлину в заявлении считать по ст. 333.19 НК РФ (ручное значение в карточке главнее)
     duty_scale: list = field(default_factory=list)      # таблица ставок; пусто — встроенная (duty.DEFAULT_SCALE)
     duty_share: float = 50.0            # судебный приказ: % от пошлины по иску
+    native_datepicker: bool = True     # выбор даты системным календарём ОС (macOS, Windows), иначе календарь программы
     theme: str = "system"               # оформление: system — как в системе, light — светлое, dark — тёмное
     org_markers: list[str] = field(default_factory=lambda: list(DEFAULT_ORG_MARKERS))
     markers_version: int = MARKERS_VERSION   # для дозаписи новых слов в сохранённый список

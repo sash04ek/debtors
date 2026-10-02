@@ -8,8 +8,10 @@ import tkinter as tk
 from datetime import date
 from tkinter import ttk
 
+import native_date
 import widgets
 
+USE_NATIVE = True          # показывать системный календарь ОС (если он есть); приложение переключает из настроек
 MONTHS = ["Январь", "Февраль", "Март", "Апрель", "Май", "Июнь", "Июль", "Август", "Сентябрь", "Октябрь", "Ноябрь", "Декабрь"]
 WEEKDAYS = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"]
 
@@ -186,10 +188,12 @@ class CalendarPopup(tk.Toplevel):
 class DateEntry(ttk.Frame):
     """Поле даты с кнопкой «▾» (календарь). suffix — что дописывать к выбранной дате (например «г.»)."""
 
-    def __init__(self, parent, textvariable: tk.StringVar | None = None, suffix: str = "", width: int = 12, command=None):
+    def __init__(self, parent, textvariable: tk.StringVar | None = None, suffix: str = "", width: int = 12, command=None,
+                 title: str = "Выберите дату"):
         super().__init__(parent)
         self.var = textvariable if textvariable is not None else tk.StringVar()
-        self.suffix, self.command = suffix, command
+        self.suffix, self.command, self.title = suffix, command, title
+        self._busy = False
         self.entry = ttk.Entry(self, textvariable=self.var, width=width)
         self.entry.pack(side="left")
         self.button = ttk.Button(self, text="▾", width=2, style="Toolbutton", takefocus=False, command=self.open_calendar)
@@ -219,14 +223,34 @@ class DateEntry(ttk.Frame):
             w.state(["!disabled"] if enabled else ["disabled"])
 
     def open_calendar(self) -> None:
-        if str(self.button.cget("state")) == "disabled":
+        if str(self.button.cget("state")) == "disabled" or self._busy:
             return
         self.tidy()
+        if USE_NATIVE and native_date.available():
+            self._busy = True
+            native_date.ask(self, self.date(), True, self.title, self._native_result,
+                            x=self.entry.winfo_rootx(), y=self.entry.winfo_rooty() + self.entry.winfo_height() + 4)
+        else:
+            self.open_builtin()
+
+    def open_builtin(self) -> None:
+        """Календарь самой программы (если системного нет или он не открылся)."""
         if self._popup is not None and self._popup.winfo_exists():
             self._popup.destroy()
             return
         self._popup = CalendarPopup(self, self.date(), self._picked, on_clear=self._cleared)
         self._popup.show_below(self.entry)
+
+    def _native_result(self, kind: str, d: date | None) -> None:
+        self._busy = False
+        if not self.winfo_exists():
+            return
+        if kind == "pick" and d:
+            self._picked(d)
+        elif kind == "clear":
+            self._cleared()
+        elif kind == "error":
+            self.open_builtin()                                  # системный календарь не открылся — свой
 
     def _picked(self, d: date) -> None:
         self.var.set(format_date(d, self.suffix))
