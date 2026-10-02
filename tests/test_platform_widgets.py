@@ -104,6 +104,26 @@ class PlatformWidgetsTest(unittest.TestCase):
             a.destroy()
 
 
+class WheelBindingTest(unittest.TestCase):
+    def test_missing_touchpad_event_does_not_break_startup(self):
+        """Регрессия: в Tk 8.6 (Windows) нет события <TouchpadScroll> — программа падала при запуске."""
+        class Root:
+            def __init__(self):
+                self.bound = []
+
+            def _bind(self, *args):
+                if "<TouchpadScroll>" in args:
+                    raise app.tk.TclError('bad event type or keysym "TouchpadScroll"')
+                self.bound.append(args)
+
+            bind_all = lambda self, seq, fn: self._bind(seq, fn)
+            bind_class = lambda self, cls, seq, fn: self._bind(cls, seq, fn)
+
+        root = Root()
+        app.install_wheel(root)                                      # не должно бросать исключение
+        self.assertTrue(any("<MouseWheel>" in b for b in root.bound))      # обычное колесо мыши по-прежнему привязано
+
+
 def _walk(w):
     yield w
     for c in w.winfo_children():

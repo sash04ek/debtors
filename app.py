@@ -166,12 +166,16 @@ def install_wheel(root: tk.Tk) -> None:
 
     for seq, h in (("<MouseWheel>", False), ("<Shift-MouseWheel>", True)):
         root.bind_all(seq, lambda e, h=h: on_wheel(e, h))
-    root.bind_all("<TouchpadScroll>", on_touchpad)
     # родные обработчики этих классов заменяем нашими, чтобы не было двойной прокрутки
     for cls in NATIVE_SCROLL:
         for seq, h in (("<MouseWheel>", False), ("<Shift-MouseWheel>", True)):
             root.bind_class(cls, seq, lambda e, h=h: on_wheel(e, h))
-        root.bind_class(cls, "<TouchpadScroll>", on_touchpad)
+    try:                                                   # событие жестов трекпада есть только в Tk 8.7/9; в Tk 8.6 (Windows) его нет
+        root.bind_all("<TouchpadScroll>", on_touchpad)
+        for cls in NATIVE_SCROLL:
+            root.bind_class(cls, "<TouchpadScroll>", on_touchpad)
+    except tk.TclError:
+        pass
     # Linux (X11): колесо приходит кнопками 4/5
     for btn, d in (("<Button-4>", 120), ("<Button-5>", -120)):
         root.bind_all(btn, lambda e, d=d: on_wheel(type("E", (), {"widget": e.widget, "delta": d})()))
