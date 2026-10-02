@@ -121,7 +121,7 @@ def build_court_application(org: Organization, card: Card, case: Case, *, path: 
 
     J, R, C = WD_ALIGN_PARAGRAPH.JUSTIFY, WD_ALIGN_PARAGRAPH.RIGHT, WD_ALIGN_PARAGRAPH.CENTER
 
-    def para(text="", align=None, size=11, indent=None, after=0, keep_bold=False):
+    def para(text="", align=None, size=11, indent=None, after=0):
         p = doc.add_paragraph()
         if align is not None:
             p.alignment = align

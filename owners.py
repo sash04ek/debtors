@@ -6,11 +6,8 @@
 
 from __future__ import annotations
 
-import json
-import os
 import re
 from dataclasses import asdict, dataclass, field, fields, replace
-from pathlib import Path
 
 import storage
 
@@ -57,8 +54,6 @@ class Card:
     payment_order: str = ""        # платёжное поручение: «№6462 от 28.09.2023»
     invoice_month: str = ""        # счёт-извещение за: «март 2023 года»
     # --- по дому ---
-    managed_since: str = ""        # дом в управлении с: «01.11.2021»
-    court_code: str = ""           # судебный участок из списка (код, напр. 61MS0203); пусто = выбрать при формировании
 
     def __post_init__(self):
         self.owners = [o if isinstance(o, Owner) else Owner(**{k: v for k, v in dict(o).items() if k in OWNER_FIELDS})

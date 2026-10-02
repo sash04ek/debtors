@@ -34,12 +34,9 @@ class Settings:
     top_n: int = 20
     name_col: str | None = None
     debt_col: str | None = None
-    inn_col: str | None = None          # необязательно
     addr_col: str | None = None         # адрес дома (для претензий и фильтра по домам)
     house_col: str | None = None        # номер дома, если он в отдельной колонке от улицы («Улица» + «Дом»)
     flat_col: str | None = None         # квартира
-    type_col: str | None = None         # необязательно: колонка «Тип лица»
-    type_value: str = "физ"             # подстрока, означающая физлицо в type_col
     ip_as_person: bool = False          # считать ИП физлицами
     skip_nonresidential: bool = True    # пропускать нежилые: «Кв» вида н/п, н/п2, н/п доп…
     restore_state: bool = True          # при запуске восстанавливать файл, отфильтрованный список и отметки
@@ -149,11 +146,9 @@ def guess_columns(headers: list[str]) -> dict[str, str | None]:
         "name_col": find("фио", "должник", "наименован", "контрагент", "абонент", "клиент", "ф.и.о"),
         "debt_col": find("сумма долга", "задолж", "долг", "сальдо", "сумма", "к оплате",
                          exclude=("дата", "пени", "договор")),
-        "inn_col": find("инн"),
         "addr_col": find("адрес", "улиц") or find("дом"),
         "house_col": next((h for h in headers if re.fullmatch(r"\s*(дом|№ дома|номер дома|д\.?)\s*", h.lower())), None),
         "flat_col": find("кв", "помещен"),
-        "type_col": find("тип лица", "вид лица", "тип контрагента", "категория", "тип"),
     }
 
 
@@ -216,27 +211,13 @@ def _has_marker(text: str, markers: list[str]) -> bool:
     return False
 
 
-def classify(name, inn, type_value, s: Settings) -> tuple[bool, str]:
+def classify(name, s: Settings) -> tuple[bool, str]:
     """Возвращает (является_физлицом, причина)."""
     name = str(name or "").strip()
-
-    if s.type_col:
-        t = str(type_value or "").lower()
-        ok = s.type_value.lower() in t
-        return ok, f"тип лица: «{type_value}»"
 
     is_ip = _has_marker(name, IP_MARKERS)
     if is_ip:
         return s.ip_as_person, "ИП"
-
-    if s.inn_col and inn not in (None, "") and looks_like_fio(name):
-        digits = re.sub(r"\D", "", str(inn))
-        if isinstance(inn, (int, float)) and len(digits) == 11:
-            digits = "0" + digits  # ведущий ноль потерян в числовой ячейке
-        if len(digits) == 10:
-            return False, "ИНН 10 цифр (юрлицо)"
-        if len(digits) == 12:
-            return (not _has_marker(name, s.org_markers)), "ИНН 12 цифр"
 
     if not name:
         return False, "пустое наименование"
@@ -336,8 +317,6 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
         raise ValueError("Выберите колонки «ФИО / Наименование» и «Сумма долга».")
     idx = {h: i for i, h in enumerate(sheet.headers)}
     ni, di = idx[s.name_col], idx[s.debt_col]
-    ii = idx.get(s.inn_col) if s.inn_col else None
-    ti = idx.get(s.type_col) if s.type_col else None
 
     houses = None
     managed = None                                        # дома в управлении сейчас; задаётся при «Только дома в управлении»
@@ -369,8 +348,7 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
         if fi is not None and is_nonresidential(flat):
             nonres += 1
             continue
-        is_person, _ = classify(r[ni], r[ii] if ii is not None else None,
-                                r[ti] if ti is not None else None, s)
+        is_person, _ = classify(r[ni], s)
         if not is_person:
             skipped_org += 1
             continue

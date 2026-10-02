@@ -2,7 +2,6 @@
 Дату можно и набрать руками: «01.06.2015», «1.6.15», «2015-06-01»; произвольный текст остаётся как есть."""
 from __future__ import annotations
 
-import calendar
 import re
 import time
 import tkinter as tk
