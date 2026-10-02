@@ -269,6 +269,19 @@ def make_autoscroll(canvas: tk.Canvas, content: tk.Misc, sb: ttk.Scrollbar, pad:
     return win
 
 
+def pack_ok_cancel(ok: ttk.Button, cancel: ttk.Button, default: bool = False) -> None:
+    """Порядок кнопок диалога по правилам платформы. macOS: «Отмена» слева от главной кнопки, главная — крайняя справа.
+    Windows/Linux: главная кнопка слева, «Отмена» — крайняя справа. default — главная кнопка выделена (срабатывает по Enter)."""
+    if default:
+        ok.configure(default="active")
+    if _is_mac(ok):
+        ok.pack(side="right")
+        cancel.pack(side="right", padx=6)
+    else:
+        cancel.pack(side="right")
+        ok.pack(side="right", padx=6)
+
+
 class Dialog(tk.Toplevel):
     """Дочернее окно, которое не показывается, пока не построено и не поставлено на место (center_over):
     иначе оно на мгновение появляется в углу экрана и потом «переезжает».
@@ -279,6 +292,8 @@ class Dialog(tk.Toplevel):
         super().__init__(*args, **kwargs)
         self.withdraw()
         self._transient_master = None
+        if _is_mac(self):
+            self.bind("<Command-w>", lambda e: self._close_by_shortcut())              # ⌘W закрывает окно, как в macOS
         self._show_job = self.after(150, self._ensure_shown)   # страховка, если окно не вызывает center_over (idle-обработчик сработал бы слишком рано)
 
     def geometry(self, newGeometry=None):
@@ -304,6 +319,13 @@ class Dialog(tk.Toplevel):
 
     def _ensure_shown(self):
         self.show()
+
+    def _close_by_shortcut(self):
+        handler = self.protocol("WM_DELETE_WINDOW")           # у окон с «сохранить при закрытии» — их обработчик
+        if handler:
+            self.tk.call(handler)
+        else:
+            self.destroy()
 
     def destroy(self):
         try:
@@ -477,6 +499,7 @@ class App(tk.Tk):
             self.createcommand("::tk::mac::OpenDocument", self._on_open_documents)     # файл брошен на значок программы / «Открыть в»
             self.createcommand("tk::mac::Quit", self.on_close)                           # ⌘Q сохраняет состояние
         self._startup_file = next((Path(a) for a in sys.argv[1:] if a.lower().endswith(STARTUP_FILE_EXT) and Path(a).is_file()), None)
+        self._build_menubar()
         self.apply_table_font()
         self.update_hint()
         self.after(150, self.restore_last_state)          # прошлое состояние восстанавливаем, когда окно уже показано
@@ -498,7 +521,7 @@ class App(tk.Tk):
         self.kind_lbl = ttk.Label(top, text="", style="Muted.TLabel")
         self.kind_lbl.pack(side="left", padx=(0, 6))
         ttk.Label(top, text="Лист:").pack(side="left", padx=(16, 2))
-        self.sheet_cb = widgets.PopupSelect(top, None, [],
+        self.sheet_cb = widgets.PopupSelect(top, None, [], chars=24,
                                             command=lambda: self.kind == "original" and self.load_sheet(self.sheet_cb.get()))
         self.sheet_cb.pack(side="left")
         # кнопка «Настройки» — шестерёнка в правом верхнем углу
@@ -517,7 +540,7 @@ class App(tk.Tk):
         orow = ttk.Frame(self)
         orow.pack(fill="x", **pad)
         ttk.Label(orow, text="Организация:").pack(side="left")
-        self.org_cb = widgets.PopupSelect(orow, None, [],
+        self.org_cb = widgets.PopupSelect(orow, None, [], chars=34,
                                           command=lambda: (self.save_state(), self.refresh_card_flags()))
         self.org_cb.pack(side="left", padx=6)
         self.org_hint = ttk.Label(orow, text="", style="Muted.TLabel")
@@ -596,7 +619,7 @@ class App(tk.Tk):
         for w in (self.first_btn, self.prev_btn, self.page_lbl, self.next_btn, self.last_btn):
             w.pack(side="left")
         ttk.Label(pager, text="  на странице:").pack(side="left")
-        size_cb = widgets.PopupSelect(pager, self.page_size_var, ("20", "50", "100", "200", "500"), width=4,
+        size_cb = widgets.PopupSelect(pager, self.page_size_var, ("20", "50", "100", "200", "500"), width=4, chars=5,
                                       command=self.change_page_size)
         size_cb.pack(side="left", padx=(4, 0))
 
@@ -1038,6 +1061,62 @@ class App(tk.Tk):
         if files:
             self.after(100, lambda: self.open_path(Path(files[0])))
 
+    # ---------- строка меню ----------
+    def _build_menubar(self):
+        """Строка меню по правилам платформы: на macOS меню приложения («О программе», «Настройки…» ⌘, и «Завершить»
+        добавляет сама система), «Файл», «Правка»; на Windows — «Файл» (с «Настройки…» и «Выход»), «Правка», «Справка»."""
+        mac = _is_mac(self)
+        key = "⌘" if mac else "Ctrl+"
+        bar = tk.Menu(self)
+        if mac:
+            bar.add_cascade(menu=tk.Menu(bar, name="apple", tearoff=0))              # меню приложения
+            self.createcommand("tkAboutDialog", self.show_about)
+            self.createcommand("::tk::mac::ShowPreferences", self.open_settings)
+        file = tk.Menu(bar, tearoff=0)
+        file.add_command(label="Открыть Excel…", accelerator=f"{key}O", command=self.open_file)
+        recent = tk.Menu(file, tearoff=0, postcommand=lambda: self.fill_recent_menu(recent))
+        file.add_cascade(label="Последние файлы", menu=recent)
+        file.add_separator()
+        file.add_command(label="Сохранить в Excel…", command=self.export)
+        if not mac:
+            file.add_separator()
+            file.add_command(label="Настройки…", accelerator="Ctrl+,", command=self.open_settings)
+            file.add_separator()
+            file.add_command(label="Выход", accelerator="Alt+F4", command=self.on_close)
+        bar.add_cascade(label="Файл", menu=file)
+        edit = tk.Menu(bar, tearoff=0)
+        for label, event, acc in (("Вырезать", "<<Cut>>", "X"), ("Копировать", "<<Copy>>", "C"), ("Вставить", "<<Paste>>", "V")):
+            edit.add_command(label=label, accelerator=f"{key}{acc}", command=lambda e=event: self._edit_event(e))
+        edit.add_separator()
+        edit.add_command(label="Выделить всё", accelerator=f"{key}A", command=lambda: self._edit_event("<<SelectAll>>"))
+        bar.add_cascade(label="Правка", menu=edit)
+        if not mac:
+            help_menu = tk.Menu(bar, tearoff=0)
+            help_menu.add_command(label="О программе", command=self.show_about)
+            bar.add_cascade(label="Справка", menu=help_menu)
+        self.configure(menu=bar)
+
+    def _edit_event(self, event: str) -> None:
+        """Команды меню «Правка» действуют на элемент, где сейчас фокус (в таблице «Копировать» копирует строки)."""
+        w = self.focus_get()
+        if w is None:
+            return
+        if w is self.tree and event == "<<Copy>>":
+            self.copy_rows()
+        elif w is self.tree and event == "<<SelectAll>>":
+            self.tree.selection_set(self.tree.get_children())
+        else:
+            w.event_generate(event)
+
+    def show_about(self):
+        try:
+            from version import VERSION
+        except ImportError:
+            VERSION = "разработка"
+        messagebox.showinfo("О программе «Должники»", f"Должники\nВерсия: {VERSION}\n\n"
+                            "Поиск должников по отчёту ЕИРЦ и формирование документов.\n"
+                            f"Данные хранятся на этом компьютере: {storage.DATA_DIR}")
+
     # ---------- последние файлы ----------
     def add_recent(self, path: Path):
         p = str(path)
@@ -1045,8 +1124,8 @@ class App(tk.Tk):
         self.settings.recent_files = self.settings.recent_files[:8]
         self.save_settings_now()
 
-    def show_recent_menu(self):
-        menu = tk.Menu(self, tearoff=0)
+    def fill_recent_menu(self, menu: tk.Menu) -> None:
+        menu.delete(0, "end")
         files = [f for f in self.settings.recent_files if Path(f).exists()]
         for f in files:
             menu.add_command(label=f"{Path(f).name}  —  {Path(f).parent}", command=lambda f=f: self.open_path(Path(f)))
@@ -1055,6 +1134,10 @@ class App(tk.Tk):
         else:
             menu.add_separator()
             menu.add_command(label="Очистить список", command=self.clear_recent)
+
+    def show_recent_menu(self):
+        menu = tk.Menu(self, tearoff=0)
+        self.fill_recent_menu(menu)
         b = self.recent_btn
         menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
 
@@ -1947,7 +2030,7 @@ class SettingsDialog(Dialog):
 
         btns = ttk.Frame(self)
         btns.pack(fill="x", padx=16, pady=12)
-        ttk.Button(btns, text="Готово", command=self.close).pack(side="right")
+        ttk.Button(btns, text="Готово", command=self.close, default="active").pack(side="right")
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Return>", lambda e: self.close())
         self.bind("<Escape>", lambda e: self.close())
@@ -2217,8 +2300,7 @@ class CourtEditDialog(Dialog):
                   style="Muted.TLabel").pack(anchor="w", pady=(2, 0))
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(12, 0))
-        ttk.Button(btns, text="Сохранить", command=self.save).pack(side="right")
-        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        pack_ok_cancel(ttk.Button(btns, text="Сохранить", command=self.save), ttk.Button(btns, text="Отмена", command=self.destroy))
         self.bind("<Escape>", lambda e: self.destroy())
         center_over(self, parent.winfo_toplevel())
 
@@ -2472,8 +2554,7 @@ class RegionsDialog(Dialog):
         self.count_lbl.pack(anchor="w")
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(10, 0))
-        ttk.Button(btns, text="Сохранить", command=self.save).pack(side="right")
-        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        pack_ok_cancel(ttk.Button(btns, text="Сохранить", command=self.save), ttk.Button(btns, text="Отмена", command=self.destroy))
         ttk.Button(btns, text="Снять все", command=self.clear).pack(side="left")
         self.bind("<Escape>", lambda e: self.destroy())
         self.refresh()
@@ -2563,8 +2644,7 @@ class DutyScaleDialog(Dialog):
         self.check_lbl.pack(anchor="w", pady=(4, 0))
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(12, 0))
-        ttk.Button(btns, text="Сохранить", command=self.save).pack(side="right")
-        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        pack_ok_cancel(ttk.Button(btns, text="Сохранить", command=self.save), ttk.Button(btns, text="Отмена", command=self.destroy))
         ttk.Button(btns, text="Сбросить к НК РФ", command=self.reset).pack(side="left")
         self.bind("<Escape>", lambda e: self.destroy())
         self.refresh()
@@ -2763,8 +2843,8 @@ class DocsDialog(Dialog):
         ttk.Button(frow, text="Изменить…", command=self.choose).pack(side="right")
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(12, 0))
-        ttk.Button(btns, text="Создать", command=self.accept).pack(side="right")
-        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        pack_ok_cancel(ttk.Button(btns, text="Создать", command=self.accept), ttk.Button(btns, text="Отмена", command=self.destroy),
+                       default=True)
         self.bind("<Escape>", lambda e: self.destroy())
         self.bind("<Return>", lambda e: self.accept())
         center_over(self, app)
@@ -2938,8 +3018,7 @@ class OwnerDialog(Dialog):
 
         btns = ttk.Frame(self, padding=12)
         btns.pack(fill="x")
-        ttk.Button(btns, text="Сохранить", command=self.save).pack(side="right")
-        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        pack_ok_cancel(ttk.Button(btns, text="Сохранить", command=self.save), ttk.Button(btns, text="Отмена", command=self.destroy))
         if owners.get_card(info["address"], info["flat"]):
             ttk.Button(btns, text="Удалить карточку", command=self.remove).pack(side="left")
         elif owners.has_trashed(info["address"], info["flat"]):
