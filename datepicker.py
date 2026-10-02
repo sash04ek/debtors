@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import calendar
 import re
+import time
 import tkinter as tk
 from datetime import date
 from tkinter import ttk
@@ -120,8 +121,6 @@ class CalendarPopup(tk.Toplevel):
         if on_clear:
             ttk.Button(foot, text="Очистить", command=self.clear).pack(side="right")
         self.render()
-        self.bind("<Button-1>", self._maybe_close, add="+")
-        self.bind("<Escape>", lambda e: self.destroy())
 
     def _nav(self, parent, text, cmd):
         p = self.pal
@@ -158,10 +157,11 @@ class CalendarPopup(tk.Toplevel):
             self.on_clear()
         self.destroy()
 
-    def _maybe_close(self, event):
-        x, y = self.winfo_rootx(), self.winfo_rooty()
-        if not (x <= event.x_root <= x + self.winfo_width() and y <= event.y_root <= y + self.winfo_height()):
-            self.destroy()
+    def select(self, d: date) -> None:
+        """Перейти на дату d (например, набранную в поле)."""
+        self.selected = d
+        self.year, self.month = d.year, d.month
+        self.render()
 
     def show_below(self, widget: tk.Misc):
         self.update_idletasks()
@@ -175,34 +175,31 @@ class CalendarPopup(tk.Toplevel):
         self.geometry(f"+{x}+{y}")
         self.deiconify()
         self.lift()
-        try:
-            self.grab_set()                                    # клик вне календаря приходит сюда и закрывает его
-        except tk.TclError:
-            pass
-        try:
-            self.focus_force()
-        except tk.TclError:
-            pass
 
 
 class DateEntry(ttk.Frame):
-    """Поле даты: календарь открывается кликом по полю (а также клавишами ↓ и F4). suffix — что дописывать к выбранной
-    дате (например «г.»). Дату можно и набрать руками."""
+    """Поле даты: клик по полю (или ↓ / F4) показывает календарь, если он ещё не показан; фокус остаётся в поле, поэтому дату
+    можно набирать с клавиатуры, а календарь следует за введённым значением. Календарь закрывается выбором дня, кликом вне поля,
+    Esc, Enter или уходом фокуса. suffix — что дописывать к выбранной дате (например «г.»)."""
 
-    def __init__(self, parent, textvariable: tk.StringVar | None = None, suffix: str = "", width: int = 12, command=None,
-                 title: str = "Выберите дату"):
+    def __init__(self, parent, textvariable: tk.StringVar | None = None, suffix: str = "", width: int = 12, command=None):
         super().__init__(parent)
         self.var = textvariable if textvariable is not None else tk.StringVar()
-        self.suffix, self.command, self.title = suffix, command, title
-        self._busy = False
+        self.suffix, self.command = suffix, command
         self.entry = ttk.Entry(self, textvariable=self.var, width=width)
         self.entry.pack(side="left")
+        self._popup: CalendarPopup | None = None
+        self._native: native_date.Pending | None = None
+        self._away_bind: tuple | None = None                  # (окно, id привязки) клика вне поля, пока календарь открыт
+        self._opened_at = 0.0
         self.entry.bind("<Button-1>", self._clicked, add="+")
         self.entry.bind("<Down>", lambda e: (self.open_calendar(), "break")[1])
         self.entry.bind("<F4>", lambda e: (self.open_calendar(), "break")[1])
-        self.entry.bind("<FocusOut>", lambda e: self.tidy(), add="+")
-        self.entry.bind("<Return>", lambda e: self.tidy(), add="+")
-        self._popup: CalendarPopup | None = None
+        self.entry.bind("<KeyRelease>", lambda e: self._sync_typed(), add="+")
+        self.entry.bind("<Escape>", self._escape)
+        self.entry.bind("<Return>", self._return)
+        self.entry.bind("<FocusOut>", self._focus_out, add="+")
+        self.bind("<Destroy>", lambda e: self.close_calendar() if e.widget is self else None, add="+")
 
     def get(self) -> str:
         return self.var.get()
@@ -222,22 +219,85 @@ class DateEntry(ttk.Frame):
 
     def set_enabled(self, enabled: bool) -> None:
         self.entry.state(["!disabled"] if enabled else ["disabled"])
+        if not enabled:
+            self.close_calendar()
+
+    # --- показ и закрытие календаря ---
+    def is_open(self) -> bool:
+        return self._native is not None or (self._popup is not None and self._popup.winfo_exists())
 
     def _clicked(self, _event=None) -> None:
-        """Клик по полю: сначала поле получает фокус и курсор, потом открывается календарь."""
+        """Клик по полю: сначала поле получает фокус и курсор, потом (если календарь не показан) он открывается."""
         self.after_idle(self.open_calendar)
 
     def open_calendar(self) -> None:
-        if self.entry.instate(["disabled"]) or self._busy:
+        if self.entry.instate(["disabled"]) or self.is_open():
             return
         self.tidy()
+        self._opened_at = time.monotonic()
+        self._arm_away()
         if USE_NATIVE and native_date.available():
-            self._busy = True
-            native_date.ask(self, self.date(), True, self.title, self._native_result,
-                            x=self.entry.winfo_rootx(), y=self.entry.winfo_rooty() + self.entry.winfo_height() + 4,
-                            y_above=self.entry.winfo_rooty(), look=self._look())
+            self._native = native_date.ask(self, self.date(), True, self._native_result,
+                                           x=self.entry.winfo_rootx(), y=self.entry.winfo_rooty() + self.entry.winfo_height() + 4,
+                                           y_above=self.entry.winfo_rooty(), look=self._look())
         else:
             self.open_builtin()
+
+    def open_builtin(self) -> None:
+        """Календарь самой программы (если системного нет или он не открылся)."""
+        if self._popup is not None and self._popup.winfo_exists():
+            return
+        self._arm_away()
+        self._popup = CalendarPopup(self, self.date(), self._picked, on_clear=self._cleared)
+        self._popup.show_below(self.entry)
+        self.entry.focus_force()                               # новое окно не должно уносить фокус из поля
+
+    def close_calendar(self) -> None:
+        if self._native is not None:
+            self._native.cancel()
+            self._native = None
+        if self._popup is not None:
+            if self._popup.winfo_exists():
+                self._popup.destroy()
+            self._popup = None
+        self._disarm_away()
+
+    def _arm_away(self) -> None:
+        """Пока календарь открыт, клик в любом другом месте окна закрывает его."""
+        if self._away_bind is not None:
+            return
+        top = self.winfo_toplevel()
+        self._away_bind = (top, top.bind("<Button-1>", self._away_click, add="+"))
+
+    def _disarm_away(self) -> None:
+        if self._away_bind is not None:
+            top, funcid = self._away_bind
+            self._away_bind = None
+            try:
+                top.unbind("<Button-1>", funcid)
+            except tk.TclError:
+                pass
+
+    def _away_click(self, event) -> None:
+        if event.widget is self.entry or self._popup is not None and str(event.widget).startswith(str(self._popup)):
+            return
+        self.close_calendar()
+
+    def _focus_out(self, _event=None) -> None:
+        self.tidy()
+        if time.monotonic() - self._opened_at > 0.4:           # сразу после показа окно календаря может на миг отнять фокус
+            self.close_calendar()
+
+    def _escape(self, _event=None):
+        if self.is_open():
+            self.close_calendar()
+            return "break"                                    # Esc закрывает только календарь, а не диалог
+
+    def _return(self, _event=None):
+        self.tidy()
+        if self.is_open():
+            self.close_calendar()
+            return "break"
 
     def _look(self) -> str:
         """Тема программы для системного календаря: «dark» или «light» (по яркости фона окна)."""
@@ -248,16 +308,25 @@ class DateEntry(ttk.Frame):
         except tk.TclError:
             return ""
 
-    def open_builtin(self) -> None:
-        """Календарь самой программы (если системного нет или он не открылся)."""
-        if self._popup is not None and self._popup.winfo_exists():
-            self._popup.destroy()
+    # --- следование за набранной датой ---
+    def _sync_typed(self) -> None:
+        """Пока календарь открыт, он переходит на дату, набранную в поле (когда набрана полностью: дд.мм.гггг)."""
+        if not self.is_open():
             return
-        self._popup = CalendarPopup(self, self.date(), self._picked, on_clear=self._cleared)
-        self._popup.show_below(self.entry)
+        text = self.var.get()
+        m = _DMY.fullmatch(text.strip().rstrip("гГ.").strip())
+        d = parse_date(text) if (m and len(m.group(3)) == 4) or _YMD.fullmatch(text.strip()) else None
+        if d is None:
+            return
+        if self._native is not None:
+            self._native.sync(d)
+        elif self._popup is not None and self._popup.winfo_exists():
+            self._popup.select(d)
 
+    # --- результат ---
     def _native_result(self, kind: str, d: date | None) -> None:
-        self._busy = False
+        self._native = None
+        self._disarm_away()
         if not self.winfo_exists():
             return
         if kind == "pick" and d:
@@ -269,10 +338,15 @@ class DateEntry(ttk.Frame):
 
     def _picked(self, d: date) -> None:
         self.var.set(format_date(d, self.suffix))
+        self.close_calendar()
+        self.entry.focus_set()
+        self.entry.icursor("end")
         if self.command:
             self.command()
 
     def _cleared(self) -> None:
         self.var.set("")
+        self.close_calendar()
+        self.entry.focus_set()
         if self.command:
             self.command()

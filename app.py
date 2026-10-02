@@ -3001,7 +3001,7 @@ class OwnerDialog(Dialog):
             row = ttk.Frame(obox)
             row.pack(fill="x", pady=(0, 4))
             if key in self.DATE_KEYS:
-                datepicker.DateEntry(row, var, title=label).pack(side="left")
+                datepicker.DateEntry(row, var).pack(side="left")
             else:
                 ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
             if key == "fio":
@@ -3027,7 +3027,7 @@ class OwnerDialog(Dialog):
                 var = tk.StringVar(value=getattr(self.card, key))
                 self.vars[key] = var
                 if key in self.DATE_KEYS:
-                    datepicker.DateEntry(box, var, title=label).pack(anchor="w", pady=(0, 4))
+                    datepicker.DateEntry(box, var).pack(anchor="w", pady=(0, 4))
                 else:
                     ttk.Entry(box, textvariable=var).pack(fill="x", pady=(0, 4))
         self.house_box = ttk.LabelFrame(form, text="Дом", padding=8)
@@ -3253,10 +3253,10 @@ class HousesEditor(ttk.Frame):
         drow = ttk.Frame(self)
         drow.pack(fill="x", pady=(6, 0))
         ttk.Label(drow, text="В управлении с:").pack(side="left")
-        self.since_entry = datepicker.DateEntry(drow, self.since, title="В управлении с (дата прихода)")
+        self.since_entry = datepicker.DateEntry(drow, self.since)
         self.since_entry.pack(side="left", padx=(6, 14))
         ttk.Label(drow, text="Ушёл (по):").pack(side="left")
-        self.until_entry = datepicker.DateEntry(drow, self.until, title="Дом ушёл (дата ухода)")
+        self.until_entry = datepicker.DateEntry(drow, self.until)
         self.until_entry.pack(side="left", padx=(6, 14))
         ttk.Checkbutton(drow, text="Ушёл, дата неизвестна", variable=self.left, command=self._left_toggled).pack(side="left")
 
@@ -3523,7 +3523,7 @@ class OrgDialog(Dialog):
         ):
             ttk.Label(h, text=label).pack(anchor="w")
             if key == "poa_text":
-                datepicker.DateEntry(h, self.c_vars[key], suffix="г.", title="Дата доверенности").pack(anchor="w", pady=(0, 4))     # «23.08.2022г.»
+                datepicker.DateEntry(h, self.c_vars[key], suffix="г.").pack(anchor="w", pady=(0, 4))     # «23.08.2022г.»
             else:
                 ttk.Entry(h, textvariable=self.c_vars[key]).pack(fill="x", pady=(0, 4))
         ttk.Label(h, text="Шапка заявления берётся со вкладки «Шапка»; подписант — со вкладки «Письмо в ЕИРЦ». Судебный участок закрепляется за домом на вкладке «Дома» или выбирается в карточке помещения и при формировании заявлений.",
