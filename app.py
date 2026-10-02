@@ -437,9 +437,7 @@ def apply_palette(root: tk.Misc) -> None:
     st.configure("Warn.TLabel", foreground="#f0a93c" if dark else "#b26a00")
     st.configure("Status.TLabel", foreground=muted, font="TkSmallCaptionFont")
     root.stripe_color = stripe
-    panel = getattr(root, "hint_panel", None)
-    if panel is not None:
-        widgets.retheme(panel)
+    widgets.retheme(root)                                       # подсказка пустого экрана и выпадающие списки главного окна
     tree = getattr(root, "tree", None)
     if tree is not None:
         tree.tag_configure("odd", background=stripe)              # чередование строк, как в Finder
@@ -500,9 +498,9 @@ class App(tk.Tk):
         self.kind_lbl = ttk.Label(top, text="", style="Muted.TLabel")
         self.kind_lbl.pack(side="left", padx=(0, 6))
         ttk.Label(top, text="Лист:").pack(side="left", padx=(16, 2))
-        self.sheet_cb = ttk.Combobox(top, state="readonly", width=24)
+        self.sheet_cb = widgets.PopupSelect(top, None, [],
+                                            command=lambda: self.kind == "original" and self.load_sheet(self.sheet_cb.get()))
         self.sheet_cb.pack(side="left")
-        self.sheet_cb.bind("<<ComboboxSelected>>", lambda e: self.kind == "original" and self.load_sheet(self.sheet_cb.get()))
         # кнопка «Настройки» — шестерёнка в правом верхнем углу
         try:
             self._gear = tk.PhotoImage(file=str(resource_path("assets/gear.png")))
@@ -519,12 +517,12 @@ class App(tk.Tk):
         orow = ttk.Frame(self)
         orow.pack(fill="x", **pad)
         ttk.Label(orow, text="Организация:").pack(side="left")
-        self.org_cb = ttk.Combobox(orow, state="readonly", width=34)
+        self.org_cb = widgets.PopupSelect(orow, None, [],
+                                          command=lambda: (self.save_state(), self.refresh_card_flags()))
         self.org_cb.pack(side="left", padx=6)
         self.org_hint = ttk.Label(orow, text="", style="Muted.TLabel")
         self.org_hint.pack(side="left", padx=10)
         self.refresh_orgs()
-        self.org_cb.bind("<<ComboboxSelected>>", lambda e: (self.save_state(), self.refresh_card_flags()))
 
         # значения настроек живут в переменных; окно «Настройки» лишь показывает их
         self.col_vars = {k: tk.StringVar() for k in COLUMN_FIELDS}
@@ -598,10 +596,9 @@ class App(tk.Tk):
         for w in (self.first_btn, self.prev_btn, self.page_lbl, self.next_btn, self.last_btn):
             w.pack(side="left")
         ttk.Label(pager, text="  на странице:").pack(side="left")
-        size_cb = ttk.Combobox(pager, textvariable=self.page_size_var, values=("20", "50", "100", "200", "500"),
-                               state="readonly", width=5)
+        size_cb = widgets.PopupSelect(pager, self.page_size_var, ("20", "50", "100", "200", "500"), width=4,
+                                      command=self.change_page_size)
         size_cb.pack(side="left", padx=(4, 0))
-        size_cb.bind("<<ComboboxSelected>>", lambda e: self.change_page_size())
 
         table = ttk.Frame(self)
         table.pack(fill="both", expand=True, **pad)
