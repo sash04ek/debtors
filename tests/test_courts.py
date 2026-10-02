@@ -1,5 +1,6 @@
 """Список судебных участков: python -m unittest discover tests"""
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -88,3 +89,80 @@ class OverridesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RegionSelectTest(unittest.TestCase):
+    def setUp(self):
+        self.old = C.COURTS_PATH
+        C.COURTS_PATH = Path(tempfile.mkdtemp()) / "courts.json"
+
+    def tearDown(self):
+        C.COURTS_PATH = self.old
+
+    def test_labels_show_name_but_value_is_code(self):
+        self.assertEqual(C.region_label("61"), "Ростовская область (61)")
+        self.assertEqual(C.region_label("5"), "Республика Дагестан (05)")
+
+    def test_codes_and_summary_for_several_regions(self):
+        self.assertEqual(C.region_codes("61, 23;61 5"), ["61", "23", "05"])
+        self.assertEqual(C.regions_summary("61"), "Ростовская область (61)")
+        self.assertEqual(C.regions_summary("61, 23, 05"), "Ростовская область (61) и ещё 2")
+        self.assertEqual(C.regions_summary(""), "Ростовская область (61)")
+
+    def test_several_regions_are_stored_and_used_for_download(self):
+        C.set_regions("61, 23")
+        self.assertEqual(C.load()["regions"], "61, 23")
+
+    def test_choice_is_remembered_without_losing_other_data(self):
+        C.save("61", [C.Court("61MS0001", "Участок № 1", "адрес")], last="61MS0001")
+        C.set_regions("23")
+        d = C.load()
+        self.assertEqual(d["regions"], "23")
+        self.assertEqual(len(d["courts"]), 1)
+        self.assertEqual(d["last"], "61MS0001")
+
+    def test_all_codes_are_two_digits_and_names_unique(self):
+        self.assertTrue(all(len(c) == 2 and c.isdigit() for c in C.REGIONS))
+        self.assertEqual(len(set(C.REGIONS.values())), len(C.REGIONS))
+
+
+class NewRegionsTest(unittest.TestCase):
+    def test_new_regions_are_listed(self):
+        self.assertEqual(C.REGIONS["82"], "Республика Крым")
+        self.assertEqual(C.REGIONS["92"], "Севастополь")
+        for code, name in (("80", "Донецкая Народная Республика"), ("81", "Луганская Народная Республика"),
+                           ("84", "Херсонская область"), ("85", "Запорожская область")):
+            self.assertEqual(C.REGIONS[code], name)
+
+    def test_download_reports_regions_without_data(self):
+        feed = ("balloons_user['82MS0001'][balloons_user['82MS0001'].length]="
+                "{type:'mir',name:'Участок 1 Симферополь',adress:'адрес 1',coord:[0,0]};"
+                "balloons_user['61MS0001'][balloons_user['61MS0001'].length]="
+                "{type:'mir',name:'Участок 1 Ростов',adress:'адрес 2',coord:[0,0]};")
+
+        class Resp:
+            def read(self):
+                return feed.encode("cp1251")
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        got = C.download("82, 61, 92", urlopen=lambda url: Resp())
+        self.assertEqual(sorted(c.code for c in got), ["61MS0001", "82MS0001"])
+        self.assertEqual(C.missing_regions(got, "82, 61, 92"), ["Севастополь (92)"])
+
+    def test_only_missing_regions_gives_clear_error(self):
+        class Resp:
+            def read(self):
+                return b"balloons_user['61MS0001'][balloons_user['61MS0001'].length]={type:'mir',name:'x',adress:'y',coord:["
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+        with self.assertRaises(C.DownloadError) as cm:
+            C.download("92", urlopen=lambda url: Resp())
+        self.assertIn("Севастополь (92)", str(cm.exception))
