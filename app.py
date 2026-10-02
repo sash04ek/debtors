@@ -1906,11 +1906,11 @@ class SettingsDialog(Dialog):
 
         cf = widgets.section(right, "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])                  # код(ы) региона — именно он хранится
-        self.region_var = tk.StringVar(value=courtsmod.regions_label(self.regions.get()))   # подпись «Название (код)» в списке
-        options = courtsmod.region_options()
-        if self.region_var.get() not in options:                                          # прежнее значение из нескольких регионов
-            options = [self.region_var.get()] + options
-        widgets.PopupSelect(cf.row("Регион"), self.region_var, options, command=self.region_chosen).pack()
+        reg_right = cf.row("Регионы")
+        ttk.Button(reg_right, text="Выбрать…", command=self.choose_regions).pack(side="right")
+        self.region_lbl = tk.Label(reg_right, text=courtsmod.regions_summary(self.regions.get()), bd=0)
+        self.region_lbl.role = "label"
+        self.region_lbl.pack(side="right", padx=(0, 8))
         loaded = cf.row("Загружено")
         self.courts_lbl = tk.Label(loaded, text="", bd=0)
         self.courts_lbl.role = "muted"
@@ -1984,11 +1984,15 @@ class SettingsDialog(Dialog):
             return
         CourtsEditorDialog(self)
 
-    def region_chosen(self):
-        """Выбран регион: запоминаем его код сразу."""
-        code = courtsmod.code_from_label(self.region_var.get(), self.regions.get())
-        self.regions.set(code)
-        courtsmod.set_regions(code)
+    def choose_regions(self):
+        RegionsDialog(self)
+
+    def regions_chosen(self, codes: list[str]):
+        """Выбраны регионы: запоминаем коды сразу и обновляем подпись."""
+        value = ", ".join(codes)
+        self.regions.set(value)
+        courtsmod.set_regions(value)
+        self.region_lbl.config(text=courtsmod.regions_summary(value))
 
     def load_courts(self):
         """Загружает публичный список участков мировых судей с sudrf.ru (без ваших данных)."""
@@ -2400,6 +2404,88 @@ def open_folder(path: Path) -> None:
 
 def _num(text: str) -> float:
     return float(str(text).replace(" ", "").replace("\u00a0", "").replace(",", "."))
+
+
+class RegionsDialog(Dialog):
+    """Выбор регионов (можно несколько): в списке название, хранятся коды."""
+
+    def __init__(self, parent: "SettingsDialog"):
+        super().__init__(parent)
+        self.parent_dlg = parent
+        self.title("Регионы")
+        self.transient(parent)
+        if _is_mac(parent.app):
+            set_window_appearance(parent.app, self, parent.app.settings.theme)
+        self.chosen = set(courtsmod.region_codes(parent.regions.get()))
+        self.codes = sorted(courtsmod.REGIONS, key=lambda c: courtsmod.REGIONS[c])
+        self.shown: list[str] = []
+        body = ttk.Frame(self, padding=14)
+        body.pack(fill="both", expand=True)
+        top = ttk.Frame(body)
+        top.pack(fill="x")
+        ttk.Label(top, text="Поиск:").pack(side="left")
+        self.query = tk.StringVar()
+        entry = ttk.Entry(top, textvariable=self.query)
+        entry.pack(side="left", fill="x", expand=True, padx=6)
+        self.query.trace_add("write", lambda *a: self.refresh())
+        box = ttk.Frame(body)
+        box.pack(fill="both", expand=True, pady=8)
+        self.tree = ttk.Treeview(box, columns=("mark", "name", "code"), show="headings", height=14, selectmode="browse")
+        for c, text, w, anchor in (("mark", "", 34, "center"), ("name", "Регион", 380, "w"), ("code", "Код", 60, "center")):
+            self.tree.heading(c, text=text)
+            self.tree.column(c, width=w, anchor=anchor, stretch=c == "name")
+        sb = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscrollcommand=sb.set)
+        self.tree.pack(side="left", fill="both", expand=True)
+        sb.pack(side="left", fill="y")
+        self.tree.bind("<Button-1>", self.on_click)
+        self.tree.bind("<space>", lambda e: (self.toggle_selected(), "break")[1])
+        self.count_lbl = ttk.Label(body, text="", style="Muted.TLabel")
+        self.count_lbl.pack(anchor="w")
+        btns = ttk.Frame(body)
+        btns.pack(fill="x", pady=(10, 0))
+        ttk.Button(btns, text="Сохранить", command=self.save).pack(side="right")
+        ttk.Button(btns, text="Отмена", command=self.destroy).pack(side="right", padx=6)
+        ttk.Button(btns, text="Снять все", command=self.clear).pack(side="left")
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.refresh()
+        center_over(self, parent)
+        entry.focus_set()
+
+    def refresh(self):
+        q = self.query.get().strip().lower()
+        self.shown = [c for c in self.codes if not q or q in courtsmod.REGIONS[c].lower() or q in c]
+        self.tree.delete(*self.tree.get_children())
+        for c in self.shown:
+            self.tree.insert("", "end", iid=c, values=("☑" if c in self.chosen else "☐", courtsmod.REGIONS[c], c))
+        self.count_lbl.config(text=f"Выбрано регионов: {len(self.chosen)}")
+
+    def _toggle(self, code: str):
+        self.chosen.symmetric_difference_update({code})
+        self.tree.item(code, values=("☑" if code in self.chosen else "☐", courtsmod.REGIONS[code], code))
+        self.count_lbl.config(text=f"Выбрано регионов: {len(self.chosen)}")
+
+    def on_click(self, event):
+        if self.tree.identify_region(event.x, event.y) == "cell":
+            item = self.tree.identify_row(event.y)
+            if item:
+                self._toggle(item)
+                return "break"
+
+    def toggle_selected(self):
+        for item in self.tree.selection():
+            self._toggle(item)
+
+    def clear(self):
+        self.chosen.clear()
+        self.refresh()
+
+    def save(self):
+        if not self.chosen:
+            messagebox.showinfo("Регионы", "Выберите хотя бы один регион.", parent=self)
+            return
+        self.parent_dlg.regions_chosen(sorted(self.chosen))
+        self.destroy()
 
 
 class DutyScaleDialog(Dialog):

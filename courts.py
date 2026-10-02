@@ -51,23 +51,21 @@ def region_label(code: str) -> str:
     return f"{REGIONS[code]} ({code})" if code in REGIONS else code
 
 
-def regions_label(regions: str) -> str:
-    """Подпись для сохранённого значения: один регион — «Название (код)», несколько (старый формат) — через запятую."""
-    codes = [c for c in re.split(r"[,\s;]+", regions or "") if c]
-    return ", ".join(region_label(c) for c in codes) or region_label(DEFAULT_REGIONS)
+def region_codes(regions: str) -> list[str]:
+    """Коды из сохранённого значения («61» или «61, 23») по порядку, без повторов."""
+    out = []
+    for c in re.split(r"[,\s;]+", regions or ""):
+        c = c.strip().zfill(2) if c.strip() else ""
+        if c and c not in out:
+            out.append(c)
+    return out
 
 
-def region_options() -> list[str]:
-    """Подписи всех регионов по алфавиту названий."""
-    return [region_label(c) for c in sorted(REGIONS, key=lambda c: REGIONS[c])]
-
-
-def code_from_label(label: str, current: str = "") -> str:
-    """Код региона из подписи «Название (код)». Если выбрана подпись прежнего списка из нескольких регионов, возвращается он же."""
-    if current and label == regions_label(current):
-        return current
-    m = re.fullmatch(r".*\((\d{2})\)", label.strip())
-    return m.group(1) if m else label.strip()
+def regions_summary(regions: str) -> str:
+    """Короткая подпись для строки настроек: один регион — «Название (код)», несколько — «Название (код) и ещё N»."""
+    codes = region_codes(regions) or [DEFAULT_REGIONS]
+    first = region_label(codes[0])
+    return first if len(codes) == 1 else f"{first} и ещё {len(codes) - 1}"
 
 
 def set_regions(regions: str) -> None:

@@ -102,14 +102,16 @@ class RegionSelectTest(unittest.TestCase):
     def test_labels_show_name_but_value_is_code(self):
         self.assertEqual(C.region_label("61"), "Ростовская область (61)")
         self.assertEqual(C.region_label("5"), "Республика Дагестан (05)")
-        self.assertEqual(C.code_from_label("Ростовская область (61)"), "61")
-        self.assertIn("Ростовская область (61)", C.region_options())
 
-    def test_legacy_several_regions_keep_their_codes(self):
-        label = C.regions_label("61, 23")
-        self.assertEqual(label, "Ростовская область (61), Краснодарский край (23)")
-        self.assertEqual(C.code_from_label(label, "61, 23"), "61, 23")
-        self.assertEqual(C.code_from_label("Краснодарский край (23)", "61, 23"), "23")
+    def test_codes_and_summary_for_several_regions(self):
+        self.assertEqual(C.region_codes("61, 23;61 5"), ["61", "23", "05"])
+        self.assertEqual(C.regions_summary("61"), "Ростовская область (61)")
+        self.assertEqual(C.regions_summary("61, 23, 05"), "Ростовская область (61) и ещё 2")
+        self.assertEqual(C.regions_summary(""), "Ростовская область (61)")
+
+    def test_several_regions_are_stored_and_used_for_download(self):
+        C.set_regions("61, 23")
+        self.assertEqual(C.load()["regions"], "61, 23")
 
     def test_choice_is_remembered_without_losing_other_data(self):
         C.save("61", [C.Court("61MS0001", "Участок № 1", "адрес")], last="61MS0001")
