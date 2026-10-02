@@ -39,7 +39,8 @@ class Organization:
     name: str                          # в претензии: ООО УО «ДомСервис»
     match: str = ""                    # слово для авто-определения по заголовку файла: «ДомСервис»
     header: str = ""                   # шапка слева (реквизиты), по строке на строку
-    houses: list = field(default_factory=list)       # дома: [{"address": «Калинина ул 113», "since": «01.11.2021», "court": код участка}]
+    houses: list = field(default_factory=list)       # дома: [{"address": «Калинина ул 113», "since": «01.11.2021», "until": «01.09.2024» (дата ухода),
+                                                     #         "left": дом ушёл, а дата ухода неизвестна, "court": код участка}]
     agent: str = ""                    # платёжный агент, напр. ООО «ЕИРЦ» (необязательно)
     agent_address: str = ""
     days: str = "10 (десяти) дней"
@@ -62,10 +63,7 @@ class Organization:
 
     def __post_init__(self):
         # совместимость: раньше дома были просто строками-адресами
-        self.houses = [{"address": h.strip(), "since": "", "court": ""} if isinstance(h, str) else
-                       {"address": str(h.get("address", "")).strip(), "since": str(h.get("since", "")).strip(),
-                        "court": str(h.get("court", "")).strip()}
-                       for h in self.houses if (h if isinstance(h, str) else h.get("address"))]
+        self.houses = [normalize_house(h) for h in self.houses if (h if isinstance(h, str) else h.get("address"))]
 
     def body_template(self) -> str:
         if self.body.strip():
@@ -216,25 +214,93 @@ def _dates_in(text: str) -> list:
     return out
 
 
-def is_managed(since: str, today=None) -> bool:
-    """Находится ли дом в управлении сейчас, по полю «В управлении с».
-    Пусто — нет. Одна дата — с этой даты (дата в будущем — ещё нет). Две даты («01.12.2019г-01.11.2020гг») — период:
-    дом в управлении, пока сегодня внутри него. Слова «ушел», «выбыл», «расторг…» — дом больше не в управлении.
-    Непустой текст без распознаваемой даты считается заполненным, то есть дом в управлении."""
-    from datetime import date
-    text = (since or "").strip()
+def _fmt(d) -> str:
+    return f"{d:%d.%m.%Y}"
+
+
+def split_since(text: str) -> tuple[str, str, bool]:
+    """Прежняя запись «В управлении с» одной строкой -> (дата прихода, дата ухода, ушёл без даты).
+    «01.06.2015г» -> («01.06.2015», «», False); «01.12.2019г-01.11.2020гг» -> («01.12.2019», «01.11.2020», False);
+    «01.06.2015г ушел» -> («01.06.2015», «», True); текст без даты остаётся в «с» как есть."""
+    text = (text or "").strip()
     if not text:
-        return False
-    low = text.lower()
-    if any(w in low for w in _LEFT_WORDS):
-        return False
+        return "", "", False
+    left = any(w in text.lower() for w in _LEFT_WORDS)
     dates = _dates_in(text)
-    today = today or date.today()
-    if not dates:
-        return True
+    if len(dates) >= 2:
+        return _fmt(min(dates)), _fmt(max(dates)), False
     if len(dates) == 1:
-        return dates[0] <= today
-    return min(dates) <= today <= max(dates)
+        return _fmt(dates[0]), "", left
+    return ("" if left else text), "", left
+
+
+def normalize_house(h) -> dict:
+    """Дом в едином виде: адрес, дата прихода, дата ухода, признак «ушёл», участок. Прежние записи (только «since»
+    строкой с периодом или словом «ушел») разбираются на отдельные поля."""
+    if isinstance(h, str):
+        h = {"address": h}
+    if "until" in h or "left" in h:
+        since, until, left = str(h.get("since", "")).strip(), str(h.get("until", "")).strip(), bool(h.get("left"))
+    else:
+        since, until, left = split_since(str(h.get("since", "")))
+    return {"address": str(h.get("address", "")).strip(), "since": since, "until": until, "left": left,
+            "court": str(h.get("court", "")).strip()}
+
+
+def _migrate_houses(data):
+    """Схема организаций 1 -> 2: у домов появились отдельные поля «until» и «left»."""
+    if isinstance(data, list):
+        for org in data:
+            if isinstance(org, dict) and "houses" in org:
+                org["houses"] = [normalize_house(h) for h in org["houses"] if (h if isinstance(h, str) else h.get("address"))]
+    return data
+
+
+storage.MIGRATIONS[("orgs", 1)] = _migrate_houses
+
+
+def is_managed_house(h: dict, today=None) -> bool:
+    """Находится ли дом в управлении сейчас.
+    Нет даты прихода — нет. Дата прихода в будущем — ещё нет. Дом ушёл (стоит признак «ушёл» без даты ухода, либо дата ухода
+    уже прошла) — нет. Непустой текст в «с» без распознаваемой даты считается заполненным (дом в управлении)."""
+    from datetime import date
+    from datepicker import parse_date
+    today = today or date.today()
+    since = (h.get("since") or "").strip()
+    until = parse_date(h.get("until") or "")
+    if h.get("left") and not until:
+        return False
+    if not since:
+        return False
+    start = parse_date(since)
+    if start and start > today:
+        return False
+    if until and today > until:
+        return False
+    return True
+
+
+def is_managed(since: str, today=None) -> bool:
+    """То же по прежней строковой записи «В управлении с» («01.06.2015г», «01.12.2019г-01.11.2020гг», «… ушел»)."""
+    s, u, left = split_since(since)
+    return is_managed_house({"since": s, "until": u, "left": left}, today)
+
+
+def house_period_text(h: dict) -> str:
+    """Подпись периода для окон: «с 01.06.2015», «с 01.12.2019 по 01.11.2020», «с 01.06.2015, ушёл (дата неизвестна)»."""
+    since, until, left = h.get("since", ""), h.get("until", ""), h.get("left")
+    text = f"с {since}" if since else ""
+    if until:
+        text += f" по {until}"
+    elif left:
+        text += (", " if text else "") + "ушёл (дата ухода неизвестна)"
+    return text
+
+
+def find_house(org: Organization, address: str) -> dict | None:
+    """Запись дома в списке домов организации (или None)."""
+    a = norm_addr(address)
+    return next((h for h in org.houses if norm_addr(h["address"]) == a), None)
 
 
 def house_since(org: Organization, address: str) -> str:

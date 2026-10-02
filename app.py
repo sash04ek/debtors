@@ -16,6 +16,7 @@ from tkinter import filedialog, messagebox, ttk
 import claim
 import core
 import court
+import datepicker
 import duty
 import courts as courtsmod
 import orgs as orgmod
@@ -2905,6 +2906,8 @@ class OwnerDialog(Dialog):
     """Карточка помещения: собственники (у помещения их может быть несколько) и данные по делу.
     Заявление о судебном приказе формируется на каждого собственника."""
 
+    DATE_KEYS = {"birth_date", "debt_from", "debt_to", "pen_from", "pen_to"}        # поля с выбором даты
+
     OWNER_ROWS = [
         ("fio", "ФИО (у первого собственника по умолчанию из отчёта)"),
         ("share", "Доля в праве (1/2, 1/3, 50%) — выводится в заявлении, на суммы не влияет"),
@@ -2990,7 +2993,10 @@ class OwnerDialog(Dialog):
             self.ovars[key] = var
             row = ttk.Frame(obox)
             row.pack(fill="x", pady=(0, 4))
-            ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
+            if key in self.DATE_KEYS:
+                datepicker.DateEntry(row, var).pack(side="left")
+            else:
+                ttk.Entry(row, textvariable=var).pack(side="left", fill="x", expand=True)
             if key == "fio":
                 ttk.Button(row, text="Из отчёта", command=self.take_report_fio).pack(side="left", padx=(6, 0))
             if key == "fio_gen":
@@ -3013,7 +3019,10 @@ class OwnerDialog(Dialog):
                 ttk.Label(box, text=label).pack(anchor="w")
                 var = tk.StringVar(value=getattr(self.card, key))
                 self.vars[key] = var
-                ttk.Entry(box, textvariable=var).pack(fill="x", pady=(0, 4))
+                if key in self.DATE_KEYS:
+                    datepicker.DateEntry(box, var).pack(anchor="w", pady=(0, 4))
+                else:
+                    ttk.Entry(box, textvariable=var).pack(fill="x", pady=(0, 4))
         self.house_box = ttk.LabelFrame(form, text="Дом", padding=8)
         self.house_box.pack(fill="x", pady=(0, 8), padx=(0, 10))
         self.render_house_box()
@@ -3036,22 +3045,24 @@ class OwnerDialog(Dialog):
         for w in self.house_box.winfo_children():
             w.destroy()
         addr = self.info["address"]
-        since = orgmod.house_since(self.org, addr)
+        house = orgmod.find_house(self.org, addr)
+        period = orgmod.house_period_text(house) if house else ""
+        managed = bool(house) and orgmod.is_managed_house(house)
         code = orgmod.house_court(self.org, addr)
         court_obj = courtsmod.find_by_code(courtsmod.load()["courts"], code) if code else None
 
-        def line(title, text, ok):
+        def line(title, text, ok, style="Ok.TLabel"):
             ttk.Label(self.house_box, text=title).pack(anchor="w", pady=(4, 0))
             if ok:
-                ttk.Label(self.house_box, text=text, style="Ok.TLabel", justify="left", wraplength=620).pack(anchor="w")
+                ttk.Label(self.house_box, text=text, style=style, justify="left", wraplength=620).pack(anchor="w")
             else:
                 ttk.Label(self.house_box, text="не указан" if title.startswith("В упр") else "не назначен",
                           style="Warn.TLabel").pack(anchor="w")
                 ttk.Button(self.house_box, text="Указать в списке домов…", command=self.open_houses).pack(anchor="w", pady=(2, 0))
-        line("В управлении с", since, bool(since))
+        line("В управлении", period, bool(period), "Ok.TLabel" if managed else "Warn.TLabel")
         line("Судебный участок", f"{court_obj.name}\nСудья: {court_obj.judge or 'не указан'}\n{court_obj.address}"
              if court_obj else "", bool(court_obj))
-        if since or court_obj:
+        if period or court_obj:
             ttk.Button(self.house_box, text="Изменить в списке домов…", command=self.open_houses).pack(anchor="w", pady=(6, 0))
 
     def open_houses(self):
@@ -3200,13 +3211,16 @@ class HousesEditor(ttk.Frame):
         self.courts = courtsmod.load()["courts"]
         self.codes: dict[str, str] = {}                 # строка таблицы -> код участка
         self.court_code = ""
-        ttk.Label(self, text="Дома в обслуживании: адрес как в отчёте, дата, с которой дом в управлении, и судебный участок "
-                             "дома (пусто = все дома файла)", wraplength=760, justify="left").pack(anchor="w")
+        ttk.Label(self, text="Дома в обслуживании: адрес как в отчёте, дата прихода (с которой дом в управлении), дата ухода "
+                             "(или отметка «ушёл, дата неизвестна») и судебный участок дома (пусто = все дома файла)",
+                  wraplength=680, justify="left").pack(anchor="w")
         box = ttk.Frame(self)
         box.pack(fill="both", expand=True, pady=(4, 8))
-        self.tree = ttk.Treeview(box, columns=("address", "since", "court"), show="headings", height=10, selectmode="extended")
-        for c, text, w, anchor in (("address", "Адрес дома", 300, "w"), ("since", "В управлении с", 110, "center"),
-                                   ("court", "Судебный участок", 240, "w")):
+        self.meta: dict[str, dict] = {}                 # строка таблицы -> {"until": дата ухода, "left": ушёл без даты}
+        self.tree = ttk.Treeview(box, columns=("address", "since", "until", "court"), show="headings", height=10,
+                                 selectmode="extended")
+        for c, text, w, anchor in (("address", "Адрес дома", 250, "w"), ("since", "В управлении с", 105, "center"),
+                                   ("until", "Ушёл (по)", 120, "center"), ("court", "Судебный участок", 220, "w")):
             self.tree.heading(c, text=text)
             self.tree.column(c, width=w, anchor=anchor)
         sb = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
@@ -3222,17 +3236,27 @@ class HousesEditor(ttk.Frame):
         row = ttk.Frame(self)
         row.pack(fill="x")
         self.addr, self.since = tk.StringVar(), tk.StringVar()
-        ttk.Entry(row, textvariable=self.addr).pack(side="left", fill="x", expand=True)
-        ttk.Entry(row, textvariable=self.since, width=12).pack(side="left", padx=6)
+        self.until, self.left = tk.StringVar(), tk.BooleanVar(value=False)
+        ttk.Entry(row, textvariable=self.addr).pack(side="left", fill="x", expand=True, padx=(0, 6))
         ttk.Button(row, text="Добавить / обновить", command=self.upsert).pack(side="left")
         self.del_btn = ttk.Button(row, text="Удалить", command=self.remove)
         self.del_btn.pack(side="left", padx=(6, 0))
         ttk.Button(row, text="Из отчёта", command=self.from_report).pack(side="left", padx=(6, 0))
 
+        drow = ttk.Frame(self)
+        drow.pack(fill="x", pady=(6, 0))
+        ttk.Label(drow, text="В управлении с:").pack(side="left")
+        self.since_entry = datepicker.DateEntry(drow, self.since)
+        self.since_entry.pack(side="left", padx=(6, 14))
+        ttk.Label(drow, text="Ушёл (по):").pack(side="left")
+        self.until_entry = datepicker.DateEntry(drow, self.until)
+        self.until_entry.pack(side="left", padx=(6, 14))
+        ttk.Checkbutton(drow, text="Ушёл, дата неизвестна", variable=self.left, command=self._left_toggled).pack(side="left")
+
         crow = ttk.Frame(self)
         crow.pack(fill="x", pady=(8, 0))
         ttk.Label(crow, text="Судебный участок:").pack(side="left")
-        self.combo = AutoCombo(crow, self._source, self._on_pick, width=52)
+        self.combo = AutoCombo(crow, self._source, self._on_pick, width=34)
         self.combo.pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(crow, text="Назначить выбранным домам", command=self.assign).pack(side="left")
         if not self.courts:
@@ -3250,15 +3274,30 @@ class HousesEditor(ttk.Frame):
         c = courtsmod.find_by_code(self.courts, code)
         return courtsmod.short_name(c) if c else (code or "")
 
-    def _insert(self, address: str, since: str, code: str) -> str:
-        item = self.tree.insert("", "end", values=(address, since, self._court_label(code)))
+    @staticmethod
+    def _until_text(until: str, left: bool) -> str:
+        return until or ("ушёл" if left else "")
+
+    def _left_toggled(self):
+        """«Ушёл, дата неизвестна» и дата ухода взаимоисключают друг друга."""
+        if self.left.get():
+            self.until.set("")
+        self.until_entry.set_enabled(not self.left.get())
+
+    def _clear_fields(self):
+        self.addr.set(""); self.since.set(""); self.until.set(""); self.left.set(False)
+        self.until_entry.set_enabled(True)
+
+    def _insert(self, address: str, since: str, until: str, left: bool, code: str) -> str:
+        item = self.tree.insert("", "end", values=(address, since, self._until_text(until, left), self._court_label(code)))
         self.codes[item] = code
+        self.meta[item] = {"until": until, "left": left}
         return item
 
     def _set_court(self, item: str, code: str):
         self.codes[item] = code
         vals = list(self.tree.item(item, "values"))
-        vals[2] = self._court_label(code)
+        vals[3] = self._court_label(code)
         self.tree.item(item, values=vals)
 
     def assign(self):
@@ -3275,10 +3314,10 @@ class HousesEditor(ttk.Frame):
     # --- данные ---
     def set(self, houses: list[dict]):
         self.tree.delete(*self.tree.get_children())
-        self.codes = {}
+        self.codes, self.meta = {}, {}
         for h in houses:
-            self._insert(h["address"], h["since"], h.get("court", ""))
-        self.addr.set(""); self.since.set("")
+            self._insert(h["address"], h["since"], h.get("until", ""), bool(h.get("left")), h.get("court", ""))
+        self._clear_fields()
         self.court_code = ""
         self.combo.set_text("")
 
@@ -3287,7 +3326,9 @@ class HousesEditor(ttk.Frame):
         for i in self.tree.get_children():
             v = self.tree.item(i, "values")
             if str(v[0]).strip():
-                out.append({"address": str(v[0]).strip(), "since": str(v[1]).strip(), "court": self.codes.get(i, "")})
+                m = self.meta.get(i, {})
+                out.append({"address": str(v[0]).strip(), "since": str(v[1]).strip(), "until": m.get("until", ""),
+                            "left": bool(m.get("left")), "court": self.codes.get(i, "")})
         return out
 
     def focus_address(self, address: str):
@@ -3298,20 +3339,23 @@ class HousesEditor(ttk.Frame):
                 self.tree.selection_set(item)
                 self.tree.see(item)
                 return
+        self._clear_fields()
         self.addr.set(str(address))
-        self.since.set("")
 
     def load_selected(self):
         sel = self.tree.selection()
         if len(sel) == 1:
             a, s = self.tree.item(sel[0], "values")[:2]
+            m = self.meta.get(sel[0], {})
             self.addr.set(a); self.since.set(s)
+            self.until.set(m.get("until", "")); self.left.set(bool(m.get("left")))
+            self.until_entry.set_enabled(not self.left.get())
             code = self.codes.get(sel[0], "")
             self.court_code = code
             c = courtsmod.find_by_code(self.courts, code)
             self.combo.set_text(c.name if c else "")
         else:                                   # несколько строк выделено — поля правки очищаем
-            self.addr.set(""); self.since.set("")
+            self._clear_fields()
         self.del_btn.config(text=f"Удалить ({len(sel)})" if len(sel) > 1 else "Удалить")
 
     def upsert(self):
@@ -3319,14 +3363,18 @@ class HousesEditor(ttk.Frame):
         if not addr:
             return
         key = orgmod.norm_addr(addr)
+        self.since_entry.tidy()
+        self.until_entry.tidy()
+        since, until, left = self.since.get().strip(), self.until.get().strip(), bool(self.left.get()) and not self.until.get().strip()
         for i in self.tree.get_children():
             if orgmod.norm_addr(self.tree.item(i, "values")[0]) == key:
-                self.tree.item(i, values=(addr, self.since.get().strip(), self._court_label(self.court_code)))
+                self.tree.item(i, values=(addr, since, self._until_text(until, left), self._court_label(self.court_code)))
                 self.codes[i] = self.court_code
+                self.meta[i] = {"until": until, "left": left}
                 return
-        item = self._insert(addr, self.since.get().strip(), self.court_code)
+        item = self._insert(addr, since, until, left, self.court_code)
         self.tree.see(item)
-        self.addr.set(""); self.since.set("")
+        self._clear_fields()
 
     def remove(self):
         sel = self.tree.selection()
@@ -3337,8 +3385,9 @@ class HousesEditor(ttk.Frame):
             return
         for i in sel:
             self.codes.pop(i, None)
+            self.meta.pop(i, None)
             self.tree.delete(i)
-        self.addr.set(""); self.since.set("")
+        self._clear_fields()
         self.del_btn.config(text="Удалить")
 
     def from_report(self):
@@ -3363,7 +3412,7 @@ class HousesEditor(ttk.Frame):
             addr = orgmod.clean_house_address(core.row_address(r, idx, addr_col, house_col))   # без квартиры, скобок и пунктуации
             if addr and orgmod.norm_addr(addr) not in have:
                 have.add(orgmod.norm_addr(addr))
-                self._insert(addr, "", "")
+                self._insert(addr, "", "", False, "")
                 added += 1
         messagebox.showinfo("Дома", f"Добавлено домов: {added}. Заполните даты, с которых дома в управлении.",
                             parent=self.winfo_toplevel())
@@ -3375,7 +3424,7 @@ class OrgDialog(Dialog):
     def __init__(self, parent, orgs, selected, on_close, focus_address: str = ""):
         super().__init__(parent)
         self.title("Организации")
-        self.geometry("820x640")
+        self.geometry("1060x640")
         self.transient(parent)
         self.orgs = [orgmod.Organization(**vars(o)) for o in orgs]
         self.on_close, self.cur = on_close, None
@@ -3466,7 +3515,10 @@ class OrgDialog(Dialog):
             ("poa_text", "Доверенность от («23.08.2022г.»)"),
         ):
             ttk.Label(h, text=label).pack(anchor="w")
-            ttk.Entry(h, textvariable=self.c_vars[key]).pack(fill="x", pady=(0, 4))
+            if key == "poa_text":
+                datepicker.DateEntry(h, self.c_vars[key], suffix="г.").pack(anchor="w", pady=(0, 4))     # «23.08.2022г.»
+            else:
+                ttk.Entry(h, textvariable=self.c_vars[key]).pack(fill="x", pady=(0, 4))
         ttk.Label(h, text="Шапка заявления берётся со вкладки «Шапка»; подписант — со вкладки «Письмо в ЕИРЦ». Судебный участок закрепляется за домом на вкладке «Дома» или выбирается в карточке помещения и при формировании заявлений.",
                   wraplength=760, justify="left",
                   style="Muted.TLabel").pack(anchor="w", pady=(8, 0))

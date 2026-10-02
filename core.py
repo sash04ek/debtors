@@ -343,10 +343,10 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
     if org is not None and getattr(org, "houses", None):
         if not s.addr_col:
             raise ValueError("У организации заданы дома — выберите колонку «Адрес».")
-        from orgs import is_managed, norm_addr
+        from orgs import is_managed_house, norm_addr
         houses = {norm_addr(h["address"]) for h in org.houses}
         if s.only_managed:
-            managed = {norm_addr(h["address"]) for h in org.houses if is_managed(h.get("since", ""))}
+            managed = {norm_addr(h["address"]) for h in org.houses if is_managed_house(h)}
     ai = idx[s.addr_col] if s.addr_col else None
     addr_of = lambda r: row_address(r, idx, s.addr_col, s.house_col)
     fi = idx[s.flat_col] if (s.flat_col and s.skip_nonresidential) else None
