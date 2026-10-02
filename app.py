@@ -2441,7 +2441,7 @@ class RegionsDialog(Dialog):
         box = ttk.Frame(body)
         box.pack(fill="both", expand=True, pady=8)
         self.tree = ttk.Treeview(box, columns=("mark", "name", "code"), show="headings", height=14, selectmode="browse")
-        for c, text, w, anchor in (("mark", "", 34, "center"), ("name", "Регион", 380, "w"), ("code", "Код", 90, "center")):
+        for c, text, w, anchor in (("mark", "", 34, "center"), ("name", "Регион", 380, "w"), ("code", "Код", 60, "center")):
             self.tree.heading(c, text=text)
             self.tree.column(c, width=w, anchor=anchor, stretch=c == "name")
         sb = ttk.Scrollbar(box, orient="vertical", command=self.tree.yview)
@@ -2462,21 +2462,17 @@ class RegionsDialog(Dialog):
         center_over(self, parent)
         entry.focus_set()
 
-    @staticmethod
-    def _codes_text(code: str) -> str:
-        return ", ".join([code] + courtsmod.ALT_CODES.get(code, []))
-
     def refresh(self):
         q = self.query.get().strip().lower()
-        self.shown = [c for c in self.codes if not q or q in courtsmod.REGIONS[c].lower() or q in self._codes_text(c)]
+        self.shown = [c for c in self.codes if not q or q in courtsmod.REGIONS[c].lower() or q in c]
         self.tree.delete(*self.tree.get_children())
         for c in self.shown:
-            self.tree.insert("", "end", iid=c, values=("☑" if c in self.chosen else "☐", courtsmod.REGIONS[c], self._codes_text(c)))
+            self.tree.insert("", "end", iid=c, values=("☑" if c in self.chosen else "☐", courtsmod.REGIONS[c], c))
         self.count_lbl.config(text=f"Выбрано регионов: {len(self.chosen)}")
 
     def _toggle(self, code: str):
         self.chosen.symmetric_difference_update({code})
-        self.tree.item(code, values=("☑" if code in self.chosen else "☐", courtsmod.REGIONS[code], self._codes_text(code)))
+        self.tree.item(code, values=("☑" if code in self.chosen else "☐", courtsmod.REGIONS[code], code))
         self.count_lbl.config(text=f"Выбрано регионов: {len(self.chosen)}")
 
     def on_click(self, event):
@@ -2498,7 +2494,7 @@ class RegionsDialog(Dialog):
         if not self.chosen:
             messagebox.showinfo("Регионы", "Выберите хотя бы один регион.", parent=self)
             return
-        self.parent_dlg.regions_chosen(courtsmod.codes_with_alternates(sorted(self.chosen)))
+        self.parent_dlg.regions_chosen(sorted(self.chosen))
         self.destroy()
 
 

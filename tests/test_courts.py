@@ -108,7 +108,6 @@ class RegionSelectTest(unittest.TestCase):
         self.assertEqual(C.regions_summary("61"), "Ростовская область (61)")
         self.assertEqual(C.regions_summary("61, 23, 05"), "Ростовская область (61) и ещё 2")
         self.assertEqual(C.regions_summary(""), "Ростовская область (61)")
-        self.assertEqual(C.regions_summary("61, 82, 182, 92"), "Ростовская область (61) и ещё 2")      # 182 — доп. код Крыма
 
     def test_several_regions_are_stored_and_used_for_download(self):
         C.set_regions("61, 23")
@@ -128,15 +127,15 @@ class RegionSelectTest(unittest.TestCase):
 
 
 class NewRegionsTest(unittest.TestCase):
-    def test_new_regions_are_listed_with_alternate_codes(self):
+    def test_new_regions_are_listed(self):
         self.assertEqual(C.REGIONS["82"], "Республика Крым")
         self.assertEqual(C.REGIONS["92"], "Севастополь")
-        self.assertEqual(C.codes_with_alternates(["82", "61", "92"]), ["82", "182", "61", "92"])
-        self.assertEqual(C.codes_with_alternates(["80", "81", "84", "85"]),
-                         ["80", "180", "81", "181", "84", "184", "85", "185"])
+        for code, name in (("80", "Донецкая Народная Республика"), ("81", "Луганская Народная Республика"),
+                           ("84", "Херсонская область"), ("85", "Запорожская область")):
+            self.assertEqual(C.REGIONS[code], name)
 
-    def test_download_matches_three_digit_prefix_and_reports_missing(self):
-        feed = ("balloons_user['182MS0001'][balloons_user['182MS0001'].length]="
+    def test_download_reports_regions_without_data(self):
+        feed = ("balloons_user['82MS0001'][balloons_user['82MS0001'].length]="
                 "{type:'mir',name:'Участок 1 Симферополь',adress:'адрес 1',coord:[0,0]};"
                 "balloons_user['61MS0001'][balloons_user['61MS0001'].length]="
                 "{type:'mir',name:'Участок 1 Ростов',adress:'адрес 2',coord:[0,0]};")
@@ -150,9 +149,9 @@ class NewRegionsTest(unittest.TestCase):
 
             def __exit__(self, *a):
                 return False
-        got = C.download("82, 182, 61, 92", urlopen=lambda url: Resp())
-        self.assertEqual(sorted(c.code for c in got), ["182MS0001", "61MS0001"])
-        self.assertEqual(C.missing_regions(got, "82, 182, 61, 92"), ["Севастополь (92)"])
+        got = C.download("82, 61, 92", urlopen=lambda url: Resp())
+        self.assertEqual(sorted(c.code for c in got), ["61MS0001", "82MS0001"])
+        self.assertEqual(C.missing_regions(got, "82, 61, 92"), ["Севастополь (92)"])
 
     def test_only_missing_regions_gives_clear_error(self):
         class Resp:
