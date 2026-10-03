@@ -124,6 +124,51 @@ class WheelBindingTest(unittest.TestCase):
         self.assertTrue(any("<MouseWheel>" in b for b in root.bound))      # обычное колесо мыши по-прежнему привязано
 
 
+class DarkTitlebarTest(unittest.TestCase):
+    def test_noop_outside_windows(self):
+        root = app.tk.Tk()
+        try:
+            if sys.platform.startswith("win"):
+                self.skipTest("только не Windows")
+            app.set_titlebar_dark(root, True)                           # не должно ничего делать и падать
+        finally:
+            root.destroy()
+
+    def test_windows_sets_immersive_dark_attribute_and_redraws_frame(self):
+        import ctypes
+        calls = []
+
+        class User32:
+            GetParent = staticmethod(lambda hwnd: 4242)
+            SetWindowPos = staticmethod(lambda *a: calls.append(("pos", a)) or 1)
+
+        class Dwm:
+            @staticmethod
+            def DwmSetWindowAttribute(hwnd, attr, ref, size):
+                calls.append(("dwm", hwnd, attr, ref._obj.value, size))
+                return 0
+
+        fake = type("W", (), {"user32": User32, "dwmapi": Dwm})
+        old_platform, had = app.sys.platform, hasattr(ctypes, "windll")
+        old_windll = getattr(ctypes, "windll", None)
+        root = app.tk.Tk()
+        try:
+            app.sys.platform = "win32"
+            ctypes.windll = fake
+            app.set_titlebar_dark(root, True)
+            app.set_titlebar_dark(root, False)
+        finally:
+            app.sys.platform = old_platform
+            if had:
+                ctypes.windll = old_windll
+            else:
+                del ctypes.windll
+            root.destroy()
+        dwm = [c for c in calls if c[0] == "dwm"]
+        self.assertEqual([(c[1], c[2], c[3]) for c in dwm], [(4242, 20, 1), (4242, 20, 0)])    # тёмный, затем светлый
+        self.assertEqual(len([c for c in calls if c[0] == "pos"]), 2)                        # рамка перерисована
+
+
 def _walk(w):
     yield w
     for c in w.winfo_children():

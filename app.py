@@ -318,6 +318,7 @@ class Dialog(tk.Toplevel):
             if self.state() == "withdrawn":
                 if self._transient_master is not None:
                     super().transient(self._transient_master)
+                set_titlebar_dark(self, bool(getattr(self.nametowidget("."), "is_dark", False)))      # заголовок в теме программы
                 self.deiconify()
         except tk.TclError:
             pass                                               # окно уже закрыли
@@ -431,6 +432,25 @@ def _sun_valley(root: tk.Tk, dark: bool) -> bool:
     return True
 
 
+def set_titlebar_dark(win: tk.Misc, dark: bool) -> None:
+    """Windows 10/11: тёмная (или светлая) рамка и заголовок окна — через атрибут DWM. Tk рисует содержимое окна сам, а
+    заголовок окна принадлежит системе и остаётся светлым, пока этот атрибут не выставлен. На других системах ничего не делает."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        win.update_idletasks()
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id()) or win.winfo_id()
+        value = ctypes.c_int(1 if dark else 0)
+        for attr in (20, 19):                                  # DWMWA_USE_IMMERSIVE_DARK_MODE (Windows 10 2004+ / 11) и прежнее значение
+            if ctypes.windll.dwmapi.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(value), ctypes.sizeof(value)) == 0:
+                break
+        # перерисовать рамку (SWP_NOSIZE | SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED)
+        ctypes.windll.user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0001 | 0x0002 | 0x0004 | 0x0010 | 0x0020)
+    except Exception:
+        pass
+
+
 def apply_theme(root: tk.Tk, mode: str) -> None:
     """Применяет тему оформления. На macOS оформление даёт сама система (окна и диалоги);
     на Windows/Linux светлая — стандартная, тёмная — палитра поверх темы clam."""
@@ -442,6 +462,7 @@ def apply_theme(root: tk.Tk, mode: str) -> None:
         st = ttk.Style(root)
         dark = mode == "dark" or (mode == "system" and _system_dark_windows())
         root.theme_colors = None                                # прежние цвета берутся из стиля (_sun_valley задаст свои)
+        root.is_dark = dark                                     # новые окна берут тему отсюда (заголовок окна на Windows)
         if _sun_valley(root, dark):
             pass                                                # современное оформление Windows 11 (светлое/тёмное)
         elif dark:
@@ -463,6 +484,8 @@ def apply_theme(root: tk.Tk, mode: str) -> None:
             st.theme_use("vista" if "vista" in st.theme_names() else "default")
             st.map("Treeview", background=[("selected", "#0078d7")], foreground=[("selected", "#ffffff")])
             root.configure(background=st.lookup("TFrame", "background") or "SystemButtonFace")
+        for w in [root] + [c for c in root.winfo_children() if isinstance(c, tk.Toplevel)]:
+            set_titlebar_dark(w, dark)                          # заголовки уже открытых окон
     apply_palette(root)
 
 
