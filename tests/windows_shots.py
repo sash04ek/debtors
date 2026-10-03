@@ -4,7 +4,6 @@ import os
 import sys
 import tempfile
 import time
-import tkinter as tk
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -37,6 +36,7 @@ def shot(win, name):
 
 
 def main():
+    app.FIRST_RUN = False                                        # без окна приветствия на снимках
     app.save_settings = lambda s: None
     app.App.restore_last_state = lambda self: None
     app.App.save_state = lambda self: None
@@ -81,6 +81,14 @@ def main():
     a.show_rows(headers, rows, numbered=True)
     settle(a)
     shot(a, f"{mode_tag}-06-main-result")
+    # открытое меню «Файл»: рисуется самим Tk, поэтому снимок делаем обычным способом
+    menu = a.menus["Файл"]
+    btn = [b for b in a.menubar_frame.winfo_children()][0]
+    menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+    settle(a, 0.5)
+    x, y, w = a.winfo_rootx(), a.winfo_rooty(), a.winfo_width()
+    ImageGrab.grab(bbox=(max(0, x - 8), max(0, y - 40), x + w + 8, y + 330), all_screens=True).save(OUT / f"{mode_tag}-07-menu-file.png")
+    menu.unpost()
     a.destroy()
 
 

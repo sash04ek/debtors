@@ -220,7 +220,7 @@ def install_clipboard(root: tk.Tk) -> None:
         w = event.widget
         w.focus_set()
         editable = str(w.cget("state")) not in ("readonly", "disabled")
-        m = tk.Menu(w, tearoff=0)
+        m = new_menu(w)
         for label, ev, need_edit in (("Вырезать", "<<Cut>>", True), ("Копировать", "<<Copy>>", False),
                                      ("Вставить", "<<Paste>>", True)):
             m.add_command(label=label, command=lambda ev=ev: w.event_generate(ev),
@@ -432,6 +432,31 @@ def _sun_valley(root: tk.Tk, dark: bool) -> bool:
     return True
 
 
+def new_menu(parent: tk.Misc, **kw):
+    """Меню. На macOS — системное (tk.Menu). На Windows/Linux — меню, нарисованное Tk (widgets.PopupMenu): системное меню Windows
+    остаётся светлым в тёмной теме (рамка, разделители)."""
+    if isinstance(parent, widgets.PopupMenu):
+        parent = parent.parent
+    if _is_mac(parent):
+        return tk.Menu(parent, tearoff=0, **kw)
+    return widgets.PopupMenu(parent, postcommand=kw.get("postcommand"))
+
+
+def set_dark_menus(dark: bool) -> None:
+    """Windows 10/11: выпадающие и контекстные меню (их рисует система) в тёмной или светлой теме — через предпочтительный режим
+    приложения в uxtheme (недокументированные функции №135 и №136, ими пользуются многие программы). Иначе меню и их рамка
+    остаются светлыми. На других системах ничего не делает."""
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        import ctypes
+        ux = ctypes.WinDLL("uxtheme")
+        ctypes.WINFUNCTYPE(ctypes.c_int, ctypes.c_int)(ux[135])(2 if dark else 3)      # SetPreferredAppMode: ForceDark / ForceLight
+        ctypes.WINFUNCTYPE(None)(ux[136])()                                              # FlushMenuThemes
+    except Exception:
+        pass
+
+
 def set_titlebar_dark(win: tk.Misc, dark: bool) -> None:
     """Windows 10/11: тёмная (или светлая) рамка и заголовок окна — через атрибут DWM. Tk рисует содержимое окна сам, а
     заголовок окна принадлежит системе и остаётся светлым, пока этот атрибут не выставлен. На других системах ничего не делает."""
@@ -484,6 +509,7 @@ def apply_theme(root: tk.Tk, mode: str) -> None:
             st.theme_use("vista" if "vista" in st.theme_names() else "default")
             st.map("Treeview", background=[("selected", "#0078d7")], foreground=[("selected", "#ffffff")])
             root.configure(background=st.lookup("TFrame", "background") or "SystemButtonFace")
+        set_dark_menus(dark)
         for w in [root] + [c for c in root.winfo_children() if isinstance(c, tk.Toplevel)]:
             set_titlebar_dark(w, dark)                          # заголовки уже открытых окон
     apply_palette(root)
@@ -766,7 +792,7 @@ class App(tk.Tk):
             self.tree.selection_set(self.tree.get_children())
 
     def _build_context_menu(self):
-        self.ctx = tk.Menu(self, tearoff=0)
+        self.ctx = new_menu(self)
         self.ctx.add_command(label="Собственники помещения…", command=self.edit_owner)
         self.ctx.add_command(label="Отметить / снять отметку", command=self._toggle_selected)
         self.ctx.add_separator()
@@ -851,7 +877,7 @@ class App(tk.Tk):
     def show_header_menu(self, event):
         if not self.cols:
             return
-        menu = tk.Menu(self, tearoff=0)
+        menu = new_menu(self)
         hidden = set(self.settings.hidden_cols)
         self._col_vars = []
         for title in self._data_titles():
@@ -1138,15 +1164,16 @@ class App(tk.Tk):
         mac = _is_mac(self)
         key = "⌘" if mac else "Ctrl+"
         bar = tk.Menu(self)
+        self.menus: dict[str, tk.Menu] = {}
         if mac:
             apple = tk.Menu(bar, name="apple", tearoff=0)                              # меню приложения
             apple.add_command(label="О программе «Должники»", command=self.show_about)  # «Настройки…», «Скрыть», «Завершить» добавляет система
             bar.add_cascade(menu=apple)
             self.createcommand("tkAboutDialog", self.show_about)
             self.createcommand("::tk::mac::ShowPreferences", self.open_settings)
-        file = tk.Menu(bar, tearoff=0)
+        file = new_menu(self if not mac else bar)
         file.add_command(label="Открыть Excel…", accelerator=f"{key}O", command=self.open_file)
-        recent = tk.Menu(file, tearoff=0, postcommand=lambda: self.fill_recent_menu(recent))
+        recent = new_menu(file, postcommand=lambda: self.fill_recent_menu(recent))
         file.add_cascade(label="Последние файлы", menu=recent)
         file.add_separator()
         file.add_command(label="Сохранить в Excel…", command=self.export)
@@ -1155,18 +1182,38 @@ class App(tk.Tk):
             file.add_command(label="Настройки…", accelerator="Ctrl+,", command=self.open_settings)
             file.add_separator()
             file.add_command(label="Выход", accelerator="Alt+F4", command=self.on_close)
-        bar.add_cascade(label="Файл", menu=file)
-        edit = tk.Menu(bar, tearoff=0)
+        self.menus["Файл"] = file
+        if mac:
+            bar.add_cascade(label="Файл", menu=file)
+        edit = new_menu(self if not mac else bar)
         for label, event, acc in (("Вырезать", "<<Cut>>", "X"), ("Копировать", "<<Copy>>", "C"), ("Вставить", "<<Paste>>", "V")):
             edit.add_command(label=label, accelerator=f"{key}{acc}", command=lambda e=event: self._edit_event(e))
         edit.add_separator()
         edit.add_command(label="Выделить всё", accelerator=f"{key}A", command=lambda: self._edit_event("<<SelectAll>>"))
-        bar.add_cascade(label="Правка", menu=edit)
-        if not mac:
-            help_menu = tk.Menu(bar, tearoff=0)
+        self.menus["Правка"] = edit
+        if mac:
+            bar.add_cascade(label="Правка", menu=edit)
+            self.configure(menu=bar)                            # на macOS — системная строка меню
+        else:
+            help_menu = new_menu(self)
             help_menu.add_command(label="О программе", command=self.show_about)
-            bar.add_cascade(label="Справка", menu=help_menu)
-        self.configure(menu=bar)
+            self.menus["Справка"] = help_menu
+            self._build_tk_menubar()
+
+    def _build_tk_menubar(self) -> None:
+        """Windows: строка меню рисуется самой программой (кнопки Tk), а не системой: системная строка меню всегда светлая
+        и не поддаётся тёмной теме. Выпадающие меню остаются системными (их оформление задаёт set_dark_menus)."""
+        frame = ttk.Frame(self)
+        first = self.pack_slaves()[0] if self.pack_slaves() else None
+        if first is not None:
+            frame.pack(side="top", fill="x", before=first)
+        else:
+            frame.pack(side="top", fill="x")
+        for title, menu in self.menus.items():
+            btn = ttk.Button(frame, text=title, style="Toolbutton", takefocus=False)
+            btn.pack(side="left", padx=(2, 0), pady=1)
+            btn.configure(command=lambda b=btn, m=menu: m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height()))
+        self.menubar_frame = frame
 
     def _edit_event(self, event: str) -> None:
         """Команды меню «Правка» действуют на элемент, где сейчас фокус (в таблице «Копировать» копирует строки)."""
@@ -1208,7 +1255,7 @@ class App(tk.Tk):
             menu.add_command(label="Очистить список", command=self.clear_recent)
 
     def show_recent_menu(self):
-        menu = tk.Menu(self, tearoff=0)
+        menu = new_menu(self)
         self.fill_recent_menu(menu)
         b = self.recent_btn
         menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
@@ -1345,7 +1392,7 @@ class App(tk.Tk):
         """Меню кнопки «Создать документы»: у каждого пункта — сколько документов получится."""
         pick = self.checked_indexes()
         n = len(pick)
-        menu = tk.Menu(self, tearoff=0)
+        menu = new_menu(self)
         try:
             n_court = sum(len(j["cases"]) for j in self.court_jobs(pick)) if (n and self.settings.addr_col
                                                                               and self.settings.flat_col) else 0
