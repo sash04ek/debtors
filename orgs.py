@@ -60,7 +60,7 @@ class Organization:
     city_in: str = "г. Таганроге"      # «в г. Таганроге» (для текста заявления)
     license_text: str = ""             # «№ 679 от 18.05.2021» — уведомление о предоставлении лицензии
     poa_text: str = ""                 # «23.08.2022г.» — дата доверенности представителя
-    # --- доверенности на представителя, который отправляет документы (файлы docx в ~/.debtors/poa) ---
+    # --- доверенности на представителя, который отправляет документы (файлы doc/docx в ~/.debtors/poa) ---
     poa_mail: str = ""                 # имя файла доверенности для почты (письмо в ЕИРЦ)
     poa_court: str = ""                # имя файла доверенности для суда (заявления о судебном приказе)
 
@@ -132,6 +132,7 @@ def load_orgs() -> list[Organization]:
     return default_orgs()
 
 
+POA_EXTENSIONS = (".doc", ".docx")
 POA_KINDS = {"mail": "для почты", "court": "для суда"}
 
 
@@ -146,10 +147,11 @@ def poa_path(name: str) -> Path | None:
 def import_poa(src, kind: str, old: str = "") -> str:
     """Копирует docx доверенности в папку данных программы и возвращает сохранённое имя (прежний файл заменяется)."""
     src = Path(src)
-    if src.suffix.lower() != ".docx":
-        raise ValueError("Доверенность должна быть файлом Word (.docx).")
+    ext = src.suffix.lower()
+    if ext not in POA_EXTENSIONS:
+        raise ValueError("Доверенность должна быть файлом Word (.doc или .docx).")
     storage.POA_DIR.mkdir(parents=True, exist_ok=True)
-    name = f"{uuid.uuid4().hex}-{kind}.docx"
+    name = f"{uuid.uuid4().hex}-{kind}{ext}"
     shutil.copyfile(src, storage.POA_DIR / name)
     remove_poa(old)
     return name
@@ -167,7 +169,7 @@ def copy_poa(org: "Organization", kind: str, out_dir) -> Path | None:
     if p is None:
         return None
     label = re.sub(r'[\\/:*?"<>|«»]', "", org.name).strip()
-    dest = Path(out_dir) / f"Доверенность {POA_KINDS[kind]} {label}.docx"
+    dest = Path(out_dir) / f"Доверенность {POA_KINDS[kind]} {label}{p.suffix}"
     shutil.copyfile(p, dest)
     return dest
 

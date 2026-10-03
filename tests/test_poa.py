@@ -27,7 +27,16 @@ class PowerOfAttorneyTests(unittest.TestCase):
         self.assertIsNone(orgs.poa_path(name))
         self.assertTrue(orgs.poa_path(new).is_file())
 
-    def test_only_docx(self):
+    def test_old_doc_format_keeps_extension(self):
+        doc = self.dir / "старая.doc"
+        doc.write_bytes(b"doc")
+        org = orgs.Organization(name="Орг", poa_court=orgs.import_poa(doc, "court"))
+        self.assertTrue(org.poa_court.endswith("-court.doc"))
+        out = self.dir / "o"
+        out.mkdir()
+        self.assertEqual(orgs.copy_poa(org, "court", out).name, "Доверенность для суда Орг.doc")
+
+    def test_only_word(self):
         txt = self.dir / "a.pdf"
         txt.write_bytes(b"x")
         with self.assertRaises(ValueError):

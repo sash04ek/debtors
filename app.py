@@ -3668,7 +3668,7 @@ class OrgDialog(Dialog):
             self.poa_lbls[kind] = lbl
             btns = ttk.Frame(box)
             btns.pack(anchor="w")
-            ttk.Button(btns, text="Выбрать файл .docx…", command=lambda k=kind: self.choose_poa(k)).pack(side="left")
+            ttk.Button(btns, text="Выбрать файл (.doc, .docx)…", command=lambda k=kind: self.choose_poa(k)).pack(side="left")
             ttk.Button(btns, text="Открыть", command=lambda k=kind: self.open_poa(k)).pack(side="left", padx=6)
             ttk.Button(btns, text="Убрать", command=lambda k=kind: self.clear_poa(k)).pack(side="left")
 
@@ -3739,7 +3739,7 @@ class OrgDialog(Dialog):
 
     def choose_poa(self, kind: str):
         p = filedialog.askopenfilename(parent=self, title=f"Доверенность {orgmod.POA_KINDS[kind]}",
-                                       filetypes=[("Документ Word", "*.docx")])
+                                       filetypes=[("Документ Word", "*.doc *.docx")])
         if not p:
             return
         o = self.orgs[self.cur]

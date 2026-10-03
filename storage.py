@@ -142,7 +142,7 @@ def export_data(zip_path, directory: Path | None = None) -> list[str]:
             if (d / name).exists():
                 z.write(d / name, name)
                 names.append(name)
-        for f in sorted((d / "poa").glob("*.docx")) if (d / "poa").is_dir() else []:
+        for f in sorted((d / "poa").glob("*.doc*")) if (d / "poa").is_dir() else []:
             z.write(f, f"poa/{f.name}")
             names.append(f"poa/{f.name}")
     return names
@@ -154,7 +154,7 @@ def import_data(zip_path, directory: Path | None = None) -> list[str]:
     d = Path(directory or DATA_DIR)
     with zipfile.ZipFile(zip_path) as z:
         found = {n: z.read(n) for n in z.namelist() if n in TRANSFER_FILES}
-        poa = {n[4:]: z.read(n) for n in z.namelist() if re.fullmatch(r"poa/[0-9a-f]{32}-(?:mail|court)\.docx", n)}
+        poa = {n[4:]: z.read(n) for n in z.namelist() if re.fullmatch(r"poa/[0-9a-f]{32}-(?:mail|court)\.docx?", n)}
         if not found:
             raise ValueError("В архиве нет данных программы «Должники».")
         for name, raw in found.items():

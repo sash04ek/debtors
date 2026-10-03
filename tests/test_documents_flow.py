@@ -19,6 +19,8 @@ class DocumentsFlowTest(unittest.TestCase):
         app.messagebox.showinfo = lambda *a, **kw: None
         app.messagebox.showerror = lambda *a, **kw: self.fail(f"ошибка: {a}")
         self.app = app.App()
+        for o in self.app.orgs:                            # доверенности из реальных данных не должны попадать в проверяемую папку
+            o.poa_mail = o.poa_court = ""
         self.out = Path(tempfile.mkdtemp())
 
     def tearDown(self):
