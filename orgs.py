@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+import shutil
+import uuid
+from pathlib import Path
 from dataclasses import asdict, dataclass, field, fields
 
 import storage
@@ -28,14 +31,14 @@ BODY_NO_AGENT = """По состоянию на **{date} г.** перед {org} 
 
 
 LETTER_BODY = "\tПрошу Вас в срок до {date} предоставить сведения по начислению и оплате предоставляемых услуг для направления в суд, по адресам:"
-LETTER_TO = "**Директору ООО «ЕИРЦ»**\n**Полиенко С. А.**\n347900, г. Таганрог, пер. Комсомольский 21"
+LETTER_TO = "**Директору ООО «ЕИРЦ»**\n**Петров П. П.**\n347000, г. Таганрог, ул. Образцовая, д. 2"
 LETTER_FIELDS = ("letter_header", "letter_to", "letter_body", "sign_role", "sign_name", "city", "letter_days")
 COURT_FIELDS = ("applicant_address", "region", "city_in", "license_text", "poa_text")
 
 @dataclass
 class Organization:
-    name: str                          # в претензии: ООО УО «ДомСервис»
-    match: str = ""                    # слово для авто-определения по заголовку файла: «ДомСервис»
+    name: str                          # в претензии: ООО УО «Ромашка»
+    match: str = ""                    # слово для авто-определения по заголовку файла: «Ромашка»
     header: str = ""                   # шапка слева (реквизиты), по строке на строку
     houses: list = field(default_factory=list)       # дома: [{"address": «Калинина ул 113», "since": «01.11.2021», "until": «01.09.2024» (дата ухода),
                                                      #         "left": дом ушёл, а дата ухода неизвестна, "court": код участка}]
@@ -57,6 +60,10 @@ class Organization:
     city_in: str = "г. Таганроге"      # «в г. Таганроге» (для текста заявления)
     license_text: str = ""             # «№ 679 от 18.05.2021» — уведомление о предоставлении лицензии
     poa_text: str = ""                 # «23.08.2022г.» — дата доверенности представителя
+    # --- доверенности на представителя, который отправляет документы (файлы doc/docx в ~/.debtors/poa) ---
+    poa_mail: str = ""                 # имя файла доверенности для почты (письмо в ЕИРЦ)
+    poa_court: str = ""                # имя файла доверенности для суда (заявления о судебном приказе)
+    poa_read: list = field(default_factory=list)     # файлы доверенностей, из которых данные уже прочитаны (читаем один раз)
 
     def __post_init__(self):
         # совместимость: раньше дома были просто строками-адресами
@@ -69,37 +76,38 @@ class Organization:
 
 
 def default_orgs() -> list[Organization]:
+    """Образцы организаций для первого запуска (вымышленные данные): замените их своими в «Организации…»."""
     return [
         Organization(
-            name="ООО УО «ДомСервис»", match="ДомСервис",
+            name="ООО УО «Ромашка»", match="Ромашка",
             header=("Российская Федерация\nРостовская область\nОбщество с ограниченной ответственностью\n"
-                    "Управляющая организация «ДомСервис»\n347900 Ростовская область\n"
-                    "г. Таганрог, ул. Котлостроительная, 37/19, офис № 5; тел: 341-199.\n"
-                    "Эл. почта: ooo.uo.domservis@mail.ru,\nИНН/КПП: 6154159722/615401001\nОГРН: 1216100002766"),
-            agent="ООО «ЕИРЦ»", agent_address="347935, РО, г. Таганрог, пер. Комсомольский, д. 21",
-            letter_header=("# Общество с ограниченной ответственностью\n# Управляющая организация «ДомСервис»\n\n"
-                           "347913, Ростовская область, г. Таганрог, ул. Котлостроительная, 37/19, оф.33\n"
-                           "р/с: 40702810028050000261 в Банк ВТБ (ПАО) ИНН/КПП: 6154159722/615401001,\n"
-                           "ОГРН: 1216100002766, эл. почта: ooo.uo.domservis@mail.ru\n"
-                           "Тел: +7(918)-586-34-87"),
-            letter_to=LETTER_TO, sign_name="В. Е. Павличенко",
-            applicant_address="347910, Ростовская область. г. Таганрог, ул. Котлостроительная, 37/19, оф.33",
-            license_text="№ 679 от 18.05.2021", poa_text="23.08.2022г.",
+                    "Управляющая организация «Ромашка»\n347000 Ростовская область\n"
+                    "г. Таганрог, ул. Примерная, 1, офис № 1; тел: 000-000.\n"
+                    "Эл. почта: example@example.com,\nИНН/КПП: 0000000000/000000000\nОГРН: 0000000000000"),
+            agent="ООО «ЕИРЦ»", agent_address="347000, РО, г. Таганрог, ул. Образцовая, д. 2",
+            letter_header=("# Общество с ограниченной ответственностью\n# Управляющая организация «Ромашка»\n\n"
+                           "347000, Ростовская область, г. Таганрог, ул. Примерная, 1, оф.1\n"
+                           "р/с: 00000000000000000000 в Банк (ПАО) ИНН/КПП: 0000000000/000000000,\n"
+                           "ОГРН: 0000000000000, эл. почта: example@example.com\n"
+                           "Тел: +7(000)-000-00-00"),
+            letter_to=LETTER_TO, sign_name="А. А. Иванов",
+            applicant_address="347000, Ростовская область, г. Таганрог, ул. Примерная, 1, оф.1",
+            license_text="№ 000 от 01.01.2020", poa_text="01.01.2022г.",
         ),
         Organization(
-            name="ООО УО «ТаганСервис»", match="ТаганСервис",
+            name="ООО УО «Василёк»", match="Василёк",
             header=("Российская Федерация\nРостовская область\nОбщество с ограниченной ответственностью\n"
-                    "Управляющая организация «ТаганСервис»\n347910 Ростовская область\n"
-                    "г. Таганрог, ул. Котлостроительная, 37/19, каб. 19; тел: 8(8634)341-015.\n"
-                    "Сайт: taganservis.ru\nИНН/КПП: 6154136429/615401001\nОГРН: 1146154036203"),
-            agent="ООО «ЕИРЦ»", agent_address="347935, РО, г. Таганрог, пер. Комсомольский, д. 21",
-            letter_header=("# Общество с ограниченной ответственностью\n# Управляющая организация «ТаганСервис»\n\n"
-                           "347910, Ростовская область, г. Таганрог, ул. Котлостроительная, 37/19, каб. 19\n"
-                           "р/с: 40702810852090010135 в ЮГО-ЗАПАДНЫЙ БАНК ПАО СБЕРБАНК, БИК 046015602\n"
-                           "ИНН/КПП: 6154136429/615401001, ОГРН: 1146154036203\n"
-                           "Тел: 8(8634)341-015"),
+                    "Управляющая организация «Василёк»\n347000 Ростовская область\n"
+                    "г. Таганрог, ул. Примерная, 1, каб. 2; тел: 000-000.\n"
+                    "Сайт: example.com\nИНН/КПП: 0000000001/000000000\nОГРН: 0000000000001"),
+            agent="ООО «ЕИРЦ»", agent_address="347000, РО, г. Таганрог, ул. Образцовая, д. 2",
+            letter_header=("# Общество с ограниченной ответственностью\n# Управляющая организация «Василёк»\n\n"
+                           "347000, Ростовская область, г. Таганрог, ул. Примерная, 1, каб. 2\n"
+                           "р/с: 00000000000000000001 в Банк (ПАО), БИК 000000000\n"
+                           "ИНН/КПП: 0000000001/000000000, ОГРН: 0000000000001\n"
+                           "Тел: 000-000"),
             letter_to=LETTER_TO,
-            applicant_address="347910, Ростовская область, г. Таганрог, ул. Котлостроительная, 37/19, каб. 19",
+            applicant_address="347000, Ростовская область, г. Таганрог, ул. Примерная, 1, каб. 2",
         ),
     ]
 
@@ -124,6 +132,70 @@ def load_orgs() -> list[Organization]:
     except Exception:
         pass
     return default_orgs()
+
+
+POA_EXTENSIONS = (".doc", ".docx")
+POA_KINDS = {"mail": "для почты", "court": "для суда"}
+
+
+def poa_path(name: str) -> Path | None:
+    """Путь к сохранённому файлу доверенности; None, если не задан или файл пропал."""
+    if not name or Path(name).name != name:
+        return None
+    p = storage.POA_DIR / name
+    return p if p.is_file() else None
+
+
+def import_poa(src, kind: str, old: str = "") -> str:
+    """Копирует docx доверенности в папку данных программы и возвращает сохранённое имя (прежний файл заменяется)."""
+    src = Path(src)
+    ext = src.suffix.lower()
+    if ext not in POA_EXTENSIONS:
+        raise ValueError("Доверенность должна быть файлом Word (.doc или .docx).")
+    storage.POA_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}-{kind}{ext}"
+    shutil.copyfile(src, storage.POA_DIR / name)
+    remove_poa(old)
+    return name
+
+
+def remove_poa(name: str) -> None:
+    p = poa_path(name)
+    if p:
+        p.unlink(missing_ok=True)
+
+
+def apply_poa_data(org: "Organization", kind: str, overwrite: bool = True) -> dict:
+    """Читает доверенность (kind: mail/court) и вписывает найденное в поля организации — один раз для каждого файла.
+    Дата — только из доверенности для суда (поле «Доверенность от»); представитель — из любой (подписант писем и заявлений).
+    overwrite=False: заполняются только пустые поля. Возвращает вписанные значения: {"poa_text": …, "sign_name": …}."""
+    import poa
+    name = getattr(org, f"poa_{kind}")
+    path = poa_path(name)
+    if path is None or name in org.poa_read:
+        return {}
+    found = poa.parse(path)
+    org.poa_read.append(name)
+    wanted = {"sign_name": found.get("name", "")}
+    if kind == "court":
+        wanted["poa_text"] = found.get("date", "")
+    changed = {}
+    for key, value in wanted.items():
+        if value and (overwrite or not getattr(org, key).strip()):
+            setattr(org, key, value)
+            changed[key] = value
+    return changed
+
+
+def copy_poa(org: "Organization", kind: str, out_dir) -> Path | None:
+    """Кладёт доверенность организации (kind: mail/court) в папку с документами. None — доверенность не задана."""
+    p = poa_path(getattr(org, f"poa_{kind}"))
+    if p is None:
+        return None
+    label = re.sub(r'[\\/:*?"<>|«»]', "", org.name).strip()
+    dest = Path(out_dir) / f"Доверенность {POA_KINDS[kind]} {label}{p.suffix}"
+    shutil.copyfile(p, dest)
+    return dest
 
 
 def save_orgs(orgs: list[Organization]) -> None:

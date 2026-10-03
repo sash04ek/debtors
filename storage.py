@@ -3,6 +3,7 @@
 Раньше файлы лежали в домашней папке россыпью (~/.debtors_*.json); при первом запуске
 новой версии они переносятся в папку. Другое место можно задать переменной DEBTORS_HOME."""
 import json
+import re
 import os
 import shutil
 import zipfile
@@ -48,6 +49,7 @@ ORGS_PATH = DATA_DIR / "orgs.json"
 COURTS_PATH = DATA_DIR / "courts.json"
 OWNERS_PATH = DATA_DIR / "owners.json"
 STATE_PATH = DATA_DIR / "state.json"
+POA_DIR = DATA_DIR / "poa"                           # файлы доверенностей организаций (docx)
 TRASH_PATH = DATA_DIR / "trash.json"                 # удалённые карточки собственников (хранятся 30 дней)
 
 # ---------- надёжная запись и версия схемы ----------
@@ -140,6 +142,9 @@ def export_data(zip_path, directory: Path | None = None) -> list[str]:
             if (d / name).exists():
                 z.write(d / name, name)
                 names.append(name)
+        for f in sorted((d / "poa").glob("*.doc*")) if (d / "poa").is_dir() else []:
+            z.write(f, f"poa/{f.name}")
+            names.append(f"poa/{f.name}")
     return names
 
 
@@ -149,6 +154,7 @@ def import_data(zip_path, directory: Path | None = None) -> list[str]:
     d = Path(directory or DATA_DIR)
     with zipfile.ZipFile(zip_path) as z:
         found = {n: z.read(n) for n in z.namelist() if n in TRANSFER_FILES}
+        poa = {n[4:]: z.read(n) for n in z.namelist() if re.fullmatch(r"poa/[0-9a-f]{32}-(?:mail|court)\.docx?", n)}
         if not found:
             raise ValueError("В архиве нет данных программы «Должники».")
         for name, raw in found.items():
@@ -160,6 +166,10 @@ def import_data(zip_path, directory: Path | None = None) -> list[str]:
     backups.mkdir(parents=True, exist_ok=True)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     export_data(backups / f"до-импорта-{stamp}.zip", d)
+    if poa:
+        (d / "poa").mkdir(parents=True, exist_ok=True)
+        for name, raw in poa.items():
+            (d / "poa" / name).write_bytes(raw)
     for name, raw in found.items():
         (d / name).write_bytes(raw)
         if name in ("owners.json", "trash.json"):
