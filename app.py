@@ -418,10 +418,9 @@ def _sun_valley(root: tk.Tk, dark: bool) -> bool:
         sv_ttk.set_theme("dark" if dark else "light", root)
     except Exception:
         return False
-    st = ttk.Style(root)
-    bg = st.lookup("TFrame", "background") or ("#1c1c1c" if dark else "#fafafa")
-    fg = st.lookup("TLabel", "foreground") or ("#ffffff" if dark else "#1c1c1c")
-    field = st.lookup("TEntry", "fieldbackground") or bg
+    # цвета Sun Valley (в Tk-стиле они недоступны для чтения)
+    fg, bg, field = ("#ffffff", "#1c1c1c", "#1c1c1c") if dark else ("#1c1c1c", "#fafafa", "#fafafa")
+    root.theme_colors = (fg, bg, field)
     root.configure(background=bg)
     for pat, opts in (("Text", {"background": field, "foreground": fg, "insertBackground": fg}),
                       ("Listbox", {"background": field, "foreground": fg}),
@@ -442,6 +441,7 @@ def apply_theme(root: tk.Tk, mode: str) -> None:
     else:
         st = ttk.Style(root)
         dark = mode == "dark" or (mode == "system" and _system_dark_windows())
+        root.theme_colors = None                                # прежние цвета берутся из стиля (_sun_valley задаст свои)
         if _sun_valley(root, dark):
             pass                                                # современное оформление Windows 11 (светлое/тёмное)
         elif dark:
@@ -470,9 +470,7 @@ def apply_palette(root: tk.Misc) -> None:
     """Приглушённый, зелёный и оранжевый цвета подписей и цвет чередования строк берутся от системной темы
     (светлой или тёмной), а не задаются жёстко, — поэтому читаются и в тёмном режиме."""
     st = ttk.Style(root)
-    fg = st.lookup("TLabel", "foreground") or "black"
-    bg = st.lookup("TLabel", "background") or "white"
-    field = "systemTextBackgroundColor" if _is_mac(root) else (st.lookup("Treeview", "fieldbackground") or "white")
+    fg, bg, field = widgets.base_colors(root)
     try:
         dark = sum(root.winfo_rgb(bg)) < 3 * 32768
         muted = widgets.mix(root, fg, bg, 0.45)
@@ -2033,7 +2031,8 @@ class SettingsDialog(Dialog):
         left.grid(row=0, column=0, sticky="new", padx=(0, 0 if narrow else 8))
         right.grid(row=1 if narrow else 0, column=0 if narrow else 1, sticky="new", padx=(0 if narrow else 8, 0))
         body.columnconfigure(0, weight=1, uniform="cols")
-        body.columnconfigure(1, weight=1, uniform="cols")
+        if not narrow:
+            body.columnconfigure(1, weight=1, uniform="cols")
 
         cols = widgets.section(left, "Колонки файла", pady=(8, 0))
         for key, text in COLUMN_FIELDS.items():
