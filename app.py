@@ -20,6 +20,7 @@ import native_date
 import duty
 import courts as courtsmod
 import orgs as orgmod
+import precheck
 import owners
 import storage
 import widgets
@@ -1409,27 +1410,19 @@ class App(tk.Tk):
         menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
 
     def check_problems(self, kind: str, pick: list[int]) -> tuple[str, list[tuple]]:
-        """Что может оказаться незаполненным в документах: (краткая сводка, [(адрес, кв., проблема)])."""
-        if kind != "court":
-            return "", []
-        rows, no_data, no_court = [], 0, 0
+        """Что может оказаться незаполненным или неверным в документах: (краткая сводка, [(адрес, кв., проблема)])."""
+        org = self.current_org()
+        rows, counts = [], {}
         for k in pick:
-            miss = []
-            if not self.card_flags[k]:
-                no_data += 1
-                miss.append("нет персональных данных")
-            if not self.court_flags[k]:
-                no_court += 1
-                miss.append("нет участка")
+            info = self.row_info(k)
+            miss = precheck.row_issues(kind, org, info["address"], self.card_flags[k], self.court_flags[k])
             if miss:
-                info = self.row_info(k)
                 rows.append((info["address"], info["flat"], ", ".join(miss)))
-        parts = []
-        if no_data:
-            parts.append(f"у {no_data} из {len(pick)} нет персональных данных")
-        if no_court:
-            parts.append(f"у {no_court} нет участка")
-        return (", ".join(parts).capitalize() if parts else ""), rows
+                for m in miss:
+                    key = m.split(" (")[0]
+                    counts[key] = counts.get(key, 0) + 1
+        parts = [f"{what}: {n} из {len(pick)}" for what, n in counts.items()]
+        return ("; ".join(parts).capitalize() if parts else ""), rows
 
     def start_progress(self, title: str, total: int):
         return ProgressWindow(self, title, total) if total >= 3 else NoProgress()
@@ -1473,7 +1466,8 @@ class App(tk.Tk):
         else:
             count = f"Заявлений: {sum(len(j['cases']) for j in jobs)} (адресов: {len(pick)})"
         summary, rows = self.check_problems(kind, pick)
-        dlg = DocsDialog(self, title, org.name, count, summary, rows, Path(s.out_dir) if s.out_dir else DEFAULT_OUT_DIR)
+        dlg = DocsDialog(self, title, org.name, count, summary, rows, Path(s.out_dir) if s.out_dir else DEFAULT_OUT_DIR,
+                         general=precheck.org_issues(kind, org))
         self.wait_window(dlg)
         if not dlg.ok:
             return
@@ -2953,7 +2947,8 @@ class ProgressWindow(Dialog):
 class DocsDialog(Dialog):
     """Подтверждение перед созданием документов: сколько будет создано, что не заполнено и в какую папку сохранить."""
 
-    def __init__(self, app: "App", title: str, org_name: str, count: str, summary: str, rows: list[tuple], folder: Path):
+    def __init__(self, app: "App", title: str, org_name: str, count: str, summary: str, rows: list[tuple], folder: Path,
+                 general: list[str] | None = None):
         super().__init__(app)
         self.title(title)
         self.transient(app)
@@ -2962,6 +2957,9 @@ class DocsDialog(Dialog):
         body.pack(fill="both", expand=True)
         ttk.Label(body, text=title, font=("", 14, "bold")).pack(anchor="w")
         ttk.Label(body, text=f"{count}\nОрганизация: {org_name}", justify="left").pack(anchor="w", pady=(4, 8))
+        if general:
+            ttk.Label(body, text="Организация:\n" + "\n".join(f"• {g}" for g in general), style="Warn.TLabel",
+                      wraplength=640, justify="left").pack(anchor="w", pady=(0, 6))
         if rows:
             ttk.Label(body, text=summary + ". Документы всё равно будут созданы, недостающие поля останутся пустыми (____).",
                       style="Warn.TLabel", wraplength=640, justify="left").pack(anchor="w")
