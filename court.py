@@ -60,7 +60,7 @@ def court_request_title(court: str) -> str:
 
 
 def property_address(org: Organization, card: Card, with_flat: bool = True) -> str:
-    """Адрес помещения: «Ростовская область, г. Таганрог, ул. Панфилова, д. 109-1, кв. 58»."""
+    """Адрес помещения: «Ростовская область, г. Таганрог, ул. Тестовая, д. 1, кв. 5»."""
     street, house = split_address(card.address)
     base = f"{org.region}, {org.city}, {street}, д. {house}"
     return f"{base}, кв. {clean_flat(card.flat)}" if with_flat else base

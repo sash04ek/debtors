@@ -43,15 +43,15 @@ class PowerOfAttorneyTests(unittest.TestCase):
             orgs.import_poa(txt, "court")
 
     def test_copy_next_to_documents_with_kind_in_name(self):
-        org = orgs.Organization(name="ООО УО «ДомСервис»")
+        org = orgs.Organization(name="ООО УО «Ромашка»")
         out = self.dir / "out"
         out.mkdir()
         self.assertIsNone(orgs.copy_poa(org, "mail", out))
         org.poa_mail = orgs.import_poa(self.src, "mail")
         org.poa_court = orgs.import_poa(self.src, "court")
         mail, court = orgs.copy_poa(org, "mail", out), orgs.copy_poa(org, "court", out)
-        self.assertEqual(mail.name, "Доверенность для почты ООО УО ДомСервис.docx")
-        self.assertEqual(court.name, "Доверенность для суда ООО УО ДомСервис.docx")
+        self.assertEqual(mail.name, "Доверенность для почты ООО УО Ромашка.docx")
+        self.assertEqual(court.name, "Доверенность для суда ООО УО Ромашка.docx")
         self.assertEqual(mail.read_bytes(), b"docx-data")
 
     def test_path_traversal_ignored(self):

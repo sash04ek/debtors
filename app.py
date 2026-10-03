@@ -3598,8 +3598,8 @@ class OrgDialog(Dialog):
             ttk.Label(f, text=label).pack(anchor="w")
             ttk.Entry(f, textvariable=var).pack(fill="x", pady=(0, 4))
 
-        row("Название в претензии (напр. ООО УО «ДомСервис»)", self.name)
-        row("Слово для автоопределения по заголовку файла (напр. ДомСервис)", self.match)
+        row("Название в претензии (напр. ООО УО «Ромашка»)", self.name)
+        row("Слово для автоопределения по заголовку файла (напр. Ромашка)", self.match)
         row("Платёжный агент (напр. ООО «ЕИРЦ»; можно пусто)", self.agent)
         row("Адрес платёжного агента", self.agent_addr)
         row("Срок оплаты в претензии", self.days)

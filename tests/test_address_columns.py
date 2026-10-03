@@ -9,10 +9,10 @@ import orgs  # noqa: E402
 
 HEAD = ["УК", "Улица", "Дом", "Кв", "ЛС", "ФИО", "Тип", "Сальдо"]
 ROWS = [
-    ['ООО УО "ТаганСервис"', "10-й пер", "114", "н/п1", 1, "ПАНКОВА О.Г.", "Владелец", 12289.38],
-    ['ООО УО "ТаганСервис"', "Инструментальная ул", "19-3 (нежилые)", "н/п", 2, "ХМЕЛЕВА О.В.", "Владелец", 8108.02],
-    ['ООО УО "ТаганСервис"', "Чужая ул", 5.0, "3", 3, "СИДОРОВ П.П.", "Владелец", 700.0],
-    ['ООО УО "ТаганСервис"', "10-й пер", "114", "н/п2", 4, "ОБЩЕСТВО РОМАШКА", "Владелец", 900.0],
+    ['ООО УО "Василёк"', "2-й пер", "114", "н/п1", 1, "ИВАНОВА А.А.", "Владелец", 12289.38],
+    ['ООО УО "Василёк"', "Тестовая ул", "19-3 (нежилые)", "н/п", 2, "ПЕТРОВА Б.Б.", "Владелец", 8108.02],
+    ['ООО УО "Василёк"', "Чужая ул", 5.0, "3", 3, "СИДОРОВ В.В.", "Владелец", 700.0],
+    ['ООО УО "Василёк"', "2-й пер", "114", "н/п2", 4, "ОБЩЕСТВО ЛАНДЫШ", "Владелец", 900.0],
 ]
 
 
@@ -28,19 +28,19 @@ class AddressColumnsTest(unittest.TestCase):
 
     def test_row_address_joins_street_and_house(self):
         idx = {h: i for i, h in enumerate(HEAD)}
-        self.assertEqual(core.row_address(ROWS[0], idx, "Улица", "Дом"), "10-й пер 114")
+        self.assertEqual(core.row_address(ROWS[0], idx, "Улица", "Дом"), "2-й пер 114")
         self.assertEqual(core.row_address(ROWS[2], idx, "Улица", "Дом"), "Чужая ул 5")            # 5.0 → «5»
-        self.assertEqual(core.row_address(ROWS[0], idx, "Улица", None), "10-й пер")              # без колонки дома — как раньше
+        self.assertEqual(core.row_address(ROWS[0], idx, "Улица", None), "2-й пер")              # без колонки дома — как раньше
         self.assertEqual(core.row_address(["Х ул 1, кв. 2"], {"А": 0}, "А", "нет"), "Х ул 1, кв. 2")
 
     def test_houses_filter_uses_combined_address(self):
-        org = orgs.Organization(name="ТаганСервис", houses=["10-й пер 114", "Инструментальная ул 19-3"])
+        org = orgs.Organization(name="Василёк", houses=["2-й пер 114", "Тестовая ул 19-3"])
         s = core.Settings(name_col="ФИО", debt_col="Сальдо", addr_col="Улица", house_col="Дом", flat_col="Кв",
                           skip_nonresidential=False)
         r = core.process(core.Sheet(HEAD, [list(x) for x in ROWS]), s, org)
-        self.assertEqual([row[5] for row in r.top], ["ПАНКОВА О.Г.", "ХМЕЛЕВА О.В."])     # чужой дом и организация отсеяны
+        self.assertEqual([row[5] for row in r.top], ["ИВАНОВА А.А.", "ПЕТРОВА Б.Б."])     # чужой дом и организация отсеяны
         self.assertEqual(r.stats["дома других организаций"], 1)
-        # без колонки дома совпадений с «10-й пер 114» нет — именно так и получался пустой список
+        # без колонки дома совпадений с «2-й пер 114» нет — именно так и получался пустой список
         s2 = core.Settings(name_col="ФИО", debt_col="Сальдо", addr_col="Улица", flat_col="Кв", skip_nonresidential=False)
         self.assertEqual(core.process(core.Sheet(HEAD, [list(x) for x in ROWS]), s2, org).top, [])
 
