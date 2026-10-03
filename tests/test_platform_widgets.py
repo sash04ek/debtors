@@ -74,9 +74,10 @@ class PlatformWidgetsTest(unittest.TestCase):
         app._is_mac = lambda r: False
         a = self._app()
         try:
-            bar = a.nametowidget(a["menu"])
-            labels = [bar.entrycget(i, "label") for i in range(bar.index("end") + 1) if bar.type(i) == "cascade"]
-            self.assertEqual(labels, ["Файл", "Правка", "Справка"])           # на Windows: свои «Файл», «Правка», «Справка»
+            self.assertEqual(str(a["menu"]), "")                              # системной строки меню нет — она всегда светлая
+            self.assertEqual([b.cget("text") for b in a.menubar_frame.winfo_children() if isinstance(b, ttk.Button)],
+                             ["Файл", "Правка", "Справка"])                    # на Windows свои «Файл», «Правка», «Справка»
+            self.assertEqual(a.menus["Файл"].entrycget(0, "label"), "Открыть Excel…")
             self.assertIsInstance(a.sheet_cb, ttk.Combobox)
             self.assertIsInstance(a.org_cb, ttk.Combobox)
             sd = app.SettingsDialog(a)

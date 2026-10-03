@@ -37,6 +37,7 @@ def shot(win, name):
 
 
 def main():
+    app.FIRST_RUN = False                                        # без окна приветствия на снимках
     app.save_settings = lambda s: None
     app.App.restore_last_state = lambda self: None
     app.App.save_state = lambda self: None
@@ -81,6 +82,12 @@ def main():
     a.show_rows(headers, rows, numbered=True)
     settle(a)
     shot(a, f"{mode_tag}-06-main-result")
+    # открытое меню «Файл» и контекстное меню таблицы (системные, должны быть в теме программы)
+    menu = a.menus["Файл"]
+    btn = [b for b in a.menubar_frame.winfo_children()][0]
+    a.after(900, lambda: (shot(a, f"{mode_tag}-07-menu-file"), menu.unpost()))
+    menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+    settle(a, 0.3)
     a.destroy()
 
 
