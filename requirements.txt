@@ -3,3 +3,4 @@ xlrd>=2.0
 python-docx>=1.1
 petrovich>=0.0.2
 certifi>=2024.2
+sv-ttk>=2.6; sys_platform != "darwin"

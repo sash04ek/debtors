@@ -41,32 +41,38 @@ def main():
     app.App.restore_last_state = lambda self: None
     app.App.save_state = lambda self: None
     mode = sys.argv[1] if len(sys.argv) > 1 else "light"
+    scale = float(sys.argv[2]) if len(sys.argv) > 2 else 0       # 2.0 ~ экран Windows с масштабом 150 % (шрифты крупнее, пиксели те же)
     a = app.App()
+    if scale:
+        a.tk.call("tk", "scaling", scale)
+        mode_tag = f"{mode}-x{scale:g}"
+    else:
+        mode_tag = mode
     a.settings.theme = mode
     a.theme_var.set({"light": "Светлая", "dark": "Тёмная"}.get(mode, "Как в системе"))
     app.apply_theme(a, mode)
     a.geometry("1100x700+10+10")
     settle(a)
     print("Tk", a.tk.call("info", "patchlevel"), a.tk.call("tk", "windowingsystem"), "тема", mode)
-    shot(a, f"{mode}-01-main-empty")
+    shot(a, f"{mode_tag}-01-main-empty")
     a.open_path(Path(__file__).resolve().parent.parent / "sample.xlsx")
     settle(a)
-    shot(a, f"{mode}-02-main-data")
+    shot(a, f"{mode_tag}-02-main-data")
     org = orgs.Organization(name="ООО УО «Тестовая»", match="Тест", houses=[
         {"address": f"Тестовая ул {n}", "since": "01.06.2015", "until": "01.11.2020" if n % 3 == 0 else "", "left": n % 4 == 1, "court": ""}
         for n in range(1, 9)])
     a.orgs = [org] + a.orgs
     sd = app.SettingsDialog(a)
     settle(sd)
-    shot(sd, f"{mode}-03-settings")
+    shot(sd, f"{mode_tag}-03-settings")
     sd.destroy()
     od = app.OrgDialog(a, a.orgs, org.name, on_close=lambda n: None)
     settle(od)
-    shot(od, f"{mode}-04-orgs-houses")
+    shot(od, f"{mode_tag}-04-orgs-houses")
     od.destroy()
     ow = app.OwnerDialog(a, {"address": "Тестовая ул 1", "flat": "5", "report_fio": "Иванов Иван Иванович", "debt": 125000.0}, org)
     settle(ow)
-    shot(ow, f"{mode}-05-owner")
+    shot(ow, f"{mode_tag}-05-owner")
     ow.destroy()
     app.datepicker.USE_NATIVE = False
     a.settings.addr_col, a.settings.flat_col, a.settings.name_col, a.settings.debt_col = "Адрес", "Кв", "ФИО", "Долг"
@@ -74,7 +80,7 @@ def main():
     a.result = core.Result(headers, rows, [r[3] for r in rows], {})
     a.show_rows(headers, rows, numbered=True)
     settle(a)
-    shot(a, f"{mode}-06-main-result")
+    shot(a, f"{mode_tag}-06-main-result")
     a.destroy()
 
 

@@ -177,6 +177,9 @@ def Switch(parent, variable: tk.BooleanVar, command=None, surface: str = "card")
     """Переключатель: «таблетка» на macOS, стандартный флажок на Windows/Linux (подпись стоит слева, в строке карточки)."""
     if is_aqua(parent):
         return _AquaSwitch(parent, variable, command, surface)
+    style = ttk.Style(parent)
+    if style.theme_use().startswith("sun-valley"):                # в теме Windows 11 есть настоящий переключатель
+        return ttk.Checkbutton(parent, variable=variable, command=command, style="Switch.TCheckbutton")
     return ttk.Checkbutton(parent, variable=variable, command=command)
 
 
