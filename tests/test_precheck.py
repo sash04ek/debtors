@@ -53,6 +53,10 @@ class RowIssuesTests(unittest.TestCase):
                          ["нет персональных данных", "нет участка"])
         self.assertEqual(precheck.row_issues("claims", org, "ул 1", card_ok=False, court_ok=False), [])
 
+    def test_partial_card_reported(self):
+        self.assertEqual(precheck.row_issues("court", full_org(), "ул 1", card_ok=True, card_full=False),
+                         ["карточка заполнена не полностью"])
+
     def test_houses_checked_only_when_list_exists(self):
         self.assertEqual(precheck.row_issues("claims", full_org(), "ул 1"), [])
         org = full_org(houses=[{"address": "Тестовая ул 1", "since": "01.01.2020"},

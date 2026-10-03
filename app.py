@@ -748,6 +748,8 @@ class App(tk.Tk):
         self.order_all: list[int] = []
         self.card_flags: list[bool] = []
         self.court_flags: list[bool] = []
+        self.card_full: list[bool] = []
+        self.card_marks: list[str] = []
         self.visible_cols: list[str] = []
         self.num_cols: set[int] = set()
         self.manual_widths = False
@@ -1415,7 +1417,8 @@ class App(tk.Tk):
         rows, counts = [], {}
         for k in pick:
             info = self.row_info(k)
-            miss = precheck.row_issues(kind, org, info["address"], self.card_flags[k], self.court_flags[k])
+            miss = precheck.row_issues(kind, org, info["address"], self.card_flags[k], self.court_flags[k],
+                                       card_full=self.card_full[k])
             if miss:
                 rows.append((info["address"], info["flat"], ", ".join(miss)))
                 for m in miss:
@@ -2002,12 +2005,14 @@ class App(tk.Tk):
         if not self.has_checks:
             return []
         return [("☑" if self.check_state[idx] else "☐"), idx + 1,
-                "✓" if self.card_flags[idx] else "", "✓" if self.court_flags[idx] else ""]
+                self.card_marks[idx] if idx < len(self.card_marks) else "", "✓" if self.court_flags[idx] else "✗"]
 
     def compute_card_flags(self):
         """Для каждой строки результата: есть ли карточка с персональными данными собственника."""
         n = len(self.data_rows) if self.has_checks else 0
         self.card_flags = [False] * n
+        self.card_full = [False] * n
+        self.card_marks = ["✗"] * n                       # ✓ карточка полная, ⚠ неполная, ✗ карточки нет
         self.court_flags = [False] * n                    # известен ли судебный участок (в карточке или за домом)
         if not (n and self.result and self.result.top and self.settings.addr_col and self.settings.flat_col):
             return
@@ -2016,8 +2021,10 @@ class App(tk.Tk):
             info = self.row_info(idx)
             d = cards.get(owners.make_key(info["address"], info["flat"]))
             if d:
-                card = owners._from_dict(d)
-                self.card_flags[idx] = any(getattr(o, k).strip() for o in card.owners for k in owners.OWNER_FIELDS)
+                status = owners.card_status(owners._from_dict(d), info["report_fio"])
+                self.card_flags[idx] = status != "none"
+                self.card_full[idx] = status == "full"
+                self.card_marks[idx] = {"full": "✓", "partial": "⚠"}.get(status, "✗")
             self.court_flags[idx] = bool(orgmod.house_court(org, info["address"]))
 
     def refresh_card_flags(self):
@@ -2043,7 +2050,7 @@ class App(tk.Tk):
         elif self.has_checks and ci == 1:
             getter = lambda idx: idx + 1
         elif self.has_checks and ci == 2:
-            getter = lambda idx: 1 if self.card_flags[idx] else 0
+            getter = lambda idx: {"✓": 2, "⚠": 1}.get(self.card_marks[idx], 0)
         elif self.has_checks and ci == 3:
             getter = lambda idx: 1 if self.court_flags[idx] else 0
         else:
@@ -2065,7 +2072,7 @@ NEXT_STEPS = (
     ("Откройте файл отчёта", f"Кнопка «Открыть Excel…» ({_OPEN_KEY}) или перетащите файл на значок программы."),
     ("Проверьте организацию и колонки", "Шестерёнка → «Настройки» и «Организации» (дома, шапки, участки)."),
     ("Нажмите «Фильтровать»", "Останутся физлица с наибольшим долгом."),
-    ("Заполните данные собственников", "Двойной клик по строке. Галка в колонке «Данные» — карточка заполнена."),
+    ("Заполните данные собственников", "Двойной клик по строке. В колонке «Данные»: ✓ карточка заполнена, ⚠ не хватает данных для заявления, ✗ карточки нет; в «Участок» ✗ — участок не задан."),
     ("Создайте документы", "Претензии, письмо в ЕИРЦ и заявления о судебном приказе."),
 )
 

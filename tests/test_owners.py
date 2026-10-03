@@ -121,3 +121,23 @@ class ApplicationsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CardStatusTest(unittest.TestCase):
+    def test_none_partial_full(self):
+        self.assertEqual(O.card_status(None), "none")
+        self.assertEqual(O.card_status(O.Card(address="Х", flat="1")), "none")
+        partial = O.Card(address="Х", flat="1", owners=[O.Owner(passport="6000 1")])
+        self.assertEqual(O.card_status(partial, "Иванов Иван Иванович"), "partial")
+        full = O.Card(address="Х", flat="1", owners=[O.Owner(birth_date="01.01.1980", birth_place="г. Город", passport="6000 1",
+                                                            reg_address="ул. Тестовая, 1")])
+        self.assertEqual(O.card_status(full, "Иванов Иван Иванович"), "full")
+
+    def test_second_owner_without_data_makes_card_partial(self):
+        data = dict(birth_date="01.01.1980", birth_place="г. Город", passport="6000 1", reg_address="ул. Тестовая, 1")
+        card = O.Card(address="Х", flat="1", owners=[O.Owner(**data), O.Owner(fio="Петров Пётр Петрович")])
+        self.assertEqual(O.card_status(card, "Иванов Иван Иванович"), "partial")
+
+    def test_unknown_owner_needs_cadastral(self):
+        self.assertEqual(O.card_status(O.Card(address="Х", flat="1", unknown=True, cadastral="61:00:000:1")), "full")
+        self.assertEqual(O.card_status(O.Card(address="Х", flat="1", unknown=True)), "none")
