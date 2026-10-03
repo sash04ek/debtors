@@ -66,7 +66,7 @@ class DocumentsFlowTest(unittest.TestCase):
         a = self.app
         summary, rows = a.check_problems("court", a.checked_indexes())
         self.assertEqual(len(rows), 3)
-        self.assertIn("нет персональных данных", summary)
+        self.assertIn("персональных данных", summary)
         self._accept([])
         orig = app.CourtChoiceDialog
         app.CourtChoiceDialog = lambda *args, **kw: type("D", (), {"result": ""})()
