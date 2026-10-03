@@ -1,8 +1,6 @@
 name: Снимки на Windows
 on:
-  workflow_dispatch:
-  push:
-    branches: ["fix/windows-look"]
+  workflow_dispatch:                 # запускается вручную: снимки окон на Windows для проверки внешнего вида
 jobs:
   shots:
     runs-on: windows-latest
