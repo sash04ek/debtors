@@ -33,10 +33,23 @@ def bold_font(root: tk.Misc) -> tkfont.Font:
     return f
 
 
-def palette(root: tk.Misc) -> dict:
+def base_colors(root: tk.Misc) -> tuple[str, str, str]:
+    """(цвет текста, фон окна, фон полей/таблицы) текущей темы. У темы Sun Valley (Windows) цвета не читаются через ttk.Style,
+    поэтому приложение запоминает их при выборе темы (theme_colors у главного окна); иначе берутся из стиля."""
+    main = root.nametowidget(".")
+    given = getattr(main, "theme_colors", None)
+    if given:
+        return given
     st = ttk.Style(root)
     fg = st.lookup("TLabel", "foreground") or "black"
     bg = st.lookup("TFrame", "background") or st.lookup("TLabel", "background") or "white"
+    field = "systemTextBackgroundColor" if root.tk.call("tk", "windowingsystem") == "aqua" else (
+        st.lookup("Treeview", "fieldbackground") or "white")
+    return fg, bg, field
+
+
+def palette(root: tk.Misc) -> dict:
+    fg, bg, field = base_colors(root)
     try:
         card = bg                                   # фон карточки как у окна: иначе вокруг ttk-кнопок видны светлые «заплатки»
         pal = {"bg": bg, "fg": fg, "card": card, "line": mix(root, bg, fg, 0.16),
@@ -45,8 +58,6 @@ def palette(root: tk.Misc) -> dict:
     except tk.TclError:
         pal = {"bg": "#ececec", "fg": "#000000", "card": "#f5f5f5", "line": "#d0d0d0", "muted": "#808080",
                "chip": "#e0e0e0", "off": "#b0b0b0"}
-    field = "systemTextBackgroundColor" if root.tk.call("tk", "windowingsystem") == "aqua" else (
-        st.lookup("Treeview", "fieldbackground") or "white")
     try:
         root.nametowidget(".").winfo_rgb(field)
         pal["field"] = field
@@ -177,6 +188,9 @@ def Switch(parent, variable: tk.BooleanVar, command=None, surface: str = "card")
     """Переключатель: «таблетка» на macOS, стандартный флажок на Windows/Linux (подпись стоит слева, в строке карточки)."""
     if is_aqua(parent):
         return _AquaSwitch(parent, variable, command, surface)
+    style = ttk.Style(parent)
+    if style.theme_use().startswith("sun-valley"):                # в теме Windows 11 есть настоящий переключатель
+        return ttk.Checkbutton(parent, variable=variable, command=command, style="Switch.TCheckbutton")
     return ttk.Checkbutton(parent, variable=variable, command=command)
 
 

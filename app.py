@@ -347,6 +347,8 @@ def center_over(win: tk.Misc, parent: tk.Misc) -> None:
     size = getattr(win, "_req_size", None)                     # размер, заданный окном явно
     w = size[0] if size else max(win.winfo_width(), win.winfo_reqwidth())
     h = size[1] if size else max(win.winfo_height(), win.winfo_reqheight())
+    w = min(w, win.winfo_screenwidth() - 40)                   # окно не должно быть больше экрана (запас под панель задач)
+    h = min(h, win.winfo_screenheight() - 100)
     x = parent.winfo_rootx() + (parent.winfo_width() - w) // 2
     y = parent.winfo_rooty() + (parent.winfo_height() - h) // 2
     x = max(0, min(x, win.winfo_screenwidth() - w))
@@ -408,6 +410,27 @@ def set_window_appearance(root: tk.Misc, win: tk.Misc, mode: str) -> None:
         pass
 
 
+def _sun_valley(root: tk.Tk, dark: bool) -> bool:
+    """Windows/Linux: тема Sun Valley (пакет sv-ttk) — оформление в духе Windows 11 вместо старого вида Tk: закруглённые
+    элементы, переключатели, аккуратные таблицы. Нет пакета — возвращает False, и используется прежнее оформление."""
+    try:
+        import sv_ttk
+        sv_ttk.set_theme("dark" if dark else "light", root)
+    except Exception:
+        return False
+    # цвета Sun Valley (в Tk-стиле они недоступны для чтения)
+    fg, bg, field = ("#ffffff", "#1c1c1c", "#1c1c1c") if dark else ("#1c1c1c", "#fafafa", "#fafafa")
+    root.theme_colors = (fg, bg, field)
+    root.configure(background=bg)
+    for pat, opts in (("Text", {"background": field, "foreground": fg, "insertBackground": fg}),
+                      ("Listbox", {"background": field, "foreground": fg}),
+                      ("Canvas", {"background": bg}),
+                      ("Menu", {"background": bg, "foreground": fg})):
+        for k, v in opts.items():
+            root.option_add(f"*{pat}.{k}", v)                   # обычные виджеты Tk: новые окна получат цвета темы
+    return True
+
+
 def apply_theme(root: tk.Tk, mode: str) -> None:
     """Применяет тему оформления. На macOS оформление даёт сама система (окна и диалоги);
     на Windows/Linux светлая — стандартная, тёмная — палитра поверх темы clam."""
@@ -418,7 +441,10 @@ def apply_theme(root: tk.Tk, mode: str) -> None:
     else:
         st = ttk.Style(root)
         dark = mode == "dark" or (mode == "system" and _system_dark_windows())
-        if dark:
+        root.theme_colors = None                                # прежние цвета берутся из стиля (_sun_valley задаст свои)
+        if _sun_valley(root, dark):
+            pass                                                # современное оформление Windows 11 (светлое/тёмное)
+        elif dark:
             c = DARK_COLORS
             st.theme_use("clam")
             st.configure(".", background=c["bg"], foreground=c["fg"], fieldbackground=c["field"],
@@ -444,9 +470,7 @@ def apply_palette(root: tk.Misc) -> None:
     """Приглушённый, зелёный и оранжевый цвета подписей и цвет чередования строк берутся от системной темы
     (светлой или тёмной), а не задаются жёстко, — поэтому читаются и в тёмном режиме."""
     st = ttk.Style(root)
-    fg = st.lookup("TLabel", "foreground") or "black"
-    bg = st.lookup("TLabel", "background") or "white"
-    field = "systemTextBackgroundColor" if _is_mac(root) else (st.lookup("Treeview", "fieldbackground") or "white")
+    fg, bg, field = widgets.base_colors(root)
     try:
         dark = sum(root.winfo_rgb(bg)) < 3 * 32768
         muted = widgets.mix(root, fg, bg, 0.45)
@@ -1955,8 +1979,9 @@ class App(tk.Tk):
             self.tree.heading(cid, text=title + (("  ▼" if desc else "  ▲") if cid == colid else ""))
 
 
+_OPEN_KEY = "⌘O" if sys.platform == "darwin" else "Ctrl+O"
 NEXT_STEPS = (
-    ("Откройте файл отчёта", "Кнопка «Открыть Excel…» (⌘O / Ctrl+O) или перетащите файл на значок программы."),
+    ("Откройте файл отчёта", f"Кнопка «Открыть Excel…» ({_OPEN_KEY}) или перетащите файл на значок программы."),
     ("Проверьте организацию и колонки", "Шестерёнка → «Настройки» и «Организации» (дома, шапки, участки)."),
     ("Нажмите «Фильтровать»", "Останутся физлица с наибольшим долгом."),
     ("Заполните данные собственников", "Двойной клик по строке. Галка в колонке «Данные» — карточка заполнена."),
@@ -1990,7 +2015,8 @@ class SettingsDialog(Dialog):
         # прокручиваемая форма из блоков-карточек в стиле системных настроек
         outer = ttk.Frame(self)
         outer.pack(fill="both", expand=True, padx=(16, 0), pady=(0, 0))
-        canvas = tk.Canvas(outer, highlightthickness=0, width=1060)
+        narrow = app.winfo_screenwidth() < 1250                 # на узком экране блоки идут в один столбец
+        canvas = tk.Canvas(outer, highlightthickness=0, width=560 if narrow else 1060)
         sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
         body = ttk.Frame(canvas)
         canvas.configure(yscrollcommand=sb.set)
@@ -2002,10 +2028,11 @@ class SettingsDialog(Dialog):
         body = pad_r
         left = ttk.Frame(body)                                # блоки в два столбца: окно не вытягивается по вертикали
         right = ttk.Frame(body)
-        left.grid(row=0, column=0, sticky="new", padx=(0, 8))
-        right.grid(row=0, column=1, sticky="new", padx=(8, 0))
+        left.grid(row=0, column=0, sticky="new", padx=(0, 0 if narrow else 8))
+        right.grid(row=1 if narrow else 0, column=0 if narrow else 1, sticky="new", padx=(0 if narrow else 8, 0))
         body.columnconfigure(0, weight=1, uniform="cols")
-        body.columnconfigure(1, weight=1, uniform="cols")
+        if not narrow:
+            body.columnconfigure(1, weight=1, uniform="cols")
 
         cols = widgets.section(left, "Колонки файла", pady=(8, 0))
         for key, text in COLUMN_FIELDS.items():
@@ -2064,7 +2091,7 @@ class SettingsDialog(Dialog):
         self.bind("<Escape>", lambda e: self.close())
         self.update_idletasks()
         h = min(canvas.bbox("all")[3] + 70, self.winfo_screenheight() - 140)
-        self.geometry(f"1100x{h}")
+        self.geometry(f"{min(600 if narrow else 1100, self.winfo_screenwidth() - 40)}x{h}")
         self.resizable(False, True)
         app.settings_dialog = self
         center_over(self, app)
@@ -2773,7 +2800,7 @@ class WelcomeDialog(Dialog):
                   wraplength=560, justify="left").pack(anchor="w", pady=(2, 10))
         widgets.steps_list(body, NEXT_STEPS, surface="window", wrap=480).pack(anchor="w")
         widgets.retheme(body)
-        ttk.Label(body, text="Все данные хранятся только на этом компьютере, в папке ~/.debtors.",
+        ttk.Label(body, text=f"Все данные хранятся только на этом компьютере, в папке {storage.DATA_DIR}.",
                   style="Muted.TLabel", wraplength=560, justify="left").pack(anchor="w", pady=(10, 0))
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(14, 0))
