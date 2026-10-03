@@ -63,6 +63,7 @@ class Organization:
     # --- доверенности на представителя, который отправляет документы (файлы doc/docx в ~/.debtors/poa) ---
     poa_mail: str = ""                 # имя файла доверенности для почты (письмо в ЕИРЦ)
     poa_court: str = ""                # имя файла доверенности для суда (заявления о судебном приказе)
+    poa_read: list = field(default_factory=list)     # файлы доверенностей, из которых данные уже прочитаны (читаем один раз)
 
     def __post_init__(self):
         # совместимость: раньше дома были просто строками-адресами
@@ -161,6 +162,28 @@ def remove_poa(name: str) -> None:
     p = poa_path(name)
     if p:
         p.unlink(missing_ok=True)
+
+
+def apply_poa_data(org: "Organization", kind: str, overwrite: bool = True) -> dict:
+    """Читает доверенность (kind: mail/court) и вписывает найденное в поля организации — один раз для каждого файла.
+    Дата — только из доверенности для суда (поле «Доверенность от»); представитель — из любой (подписант писем и заявлений).
+    overwrite=False: заполняются только пустые поля. Возвращает вписанные значения: {"poa_text": …, "sign_name": …}."""
+    import poa
+    name = getattr(org, f"poa_{kind}")
+    path = poa_path(name)
+    if path is None or name in org.poa_read:
+        return {}
+    found = poa.parse(path)
+    org.poa_read.append(name)
+    wanted = {"sign_name": found.get("name", "")}
+    if kind == "court":
+        wanted["poa_text"] = found.get("date", "")
+    changed = {}
+    for key, value in wanted.items():
+        if value and (overwrite or not getattr(org, key).strip()):
+            setattr(org, key, value)
+            changed[key] = value
+    return changed
 
 
 def copy_poa(org: "Organization", kind: str, out_dir) -> Path | None:

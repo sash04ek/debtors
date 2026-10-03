@@ -1346,6 +1346,7 @@ class App(tk.Tk):
     # ---------- организации ----------
     def refresh_orgs(self, keep=None):
         self.orgs = orgmod.load_orgs()
+        self.read_saved_poa()
         names = [o.name for o in self.orgs]
         self.org_cb["values"] = names
         self.org_cb.set(keep if keep in names else names[0])
@@ -1432,6 +1433,17 @@ class App(tk.Tk):
 
     def start_progress(self, title: str, total: int):
         return ProgressWindow(self, title, total) if total >= 3 else NoProgress()
+
+    def read_saved_poa(self) -> None:
+        """Доверенности, добавленные до появления чтения: один раз вписываем найденное в пустые поля организации."""
+        changed = False
+        for o in self.orgs:
+            for kind in orgmod.POA_KINDS:
+                n = len(o.poa_read)
+                if orgmod.apply_poa_data(o, kind, overwrite=False) or len(o.poa_read) != n:
+                    changed = True
+        if changed:
+            orgmod.save_orgs(self.orgs)
 
     def finish_docs(self, title: str, text: str, folder: Path):
         """Итог создания; предлагает открыть папку с документами."""
@@ -3748,8 +3760,15 @@ class OrgDialog(Dialog):
         except (OSError, ValueError) as e:
             messagebox.showerror("Доверенность", f"Не удалось загрузить файл:\n{e}", parent=self)
             return
+        changed = orgmod.apply_poa_data(o, kind)                 # дата и представитель вписываются в поля один раз
+        if "poa_text" in changed:
+            self.c_vars["poa_text"].set(changed["poa_text"])
+        if "sign_name" in changed:
+            self.sign_name.set(changed["sign_name"])
         self.show_poa()
-        self.poa_lbls[kind].config(text=f"Загружен: {Path(p).name}")
+        found = ", ".join(f"{label}: {changed[k]}" for k, label in (("poa_text", "дата"), ("sign_name", "представитель")) if k in changed)
+        self.poa_lbls[kind].config(text=f"Загружен: {Path(p).name}. " + (f"Из файла прочитано — {found}." if found else
+                                                                         "Дату и представителя определить не удалось — заполните поля вручную."))
 
     def open_poa(self, kind: str):
         p = orgmod.poa_path(getattr(self.orgs[self.cur], f"poa_{kind}"))
