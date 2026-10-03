@@ -346,6 +346,8 @@ class PopupMenu:
     entryconfig, tk_popup, unpost), поэтому остальной код не отличает одно от другого. Цвета берутся у темы в момент показа."""
 
     def __init__(self, parent: tk.Misc, postcommand=None):
+        while isinstance(parent, PopupMenu):                    # родитель вложенного меню — окно, а не меню
+            parent = parent.parent
         self.parent, self.postcommand = parent, postcommand
         self.entries: list[dict] = []
         self._win: tk.Toplevel | None = None

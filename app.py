@@ -435,6 +435,8 @@ def _sun_valley(root: tk.Tk, dark: bool) -> bool:
 def new_menu(parent: tk.Misc, **kw):
     """Меню. На macOS — системное (tk.Menu). На Windows/Linux — меню, нарисованное Tk (widgets.PopupMenu): системное меню Windows
     остаётся светлым в тёмной теме (рамка, разделители)."""
+    if isinstance(parent, widgets.PopupMenu):
+        parent = parent.parent
     if _is_mac(parent):
         return tk.Menu(parent, tearoff=0, **kw)
     return widgets.PopupMenu(parent, postcommand=kw.get("postcommand"))

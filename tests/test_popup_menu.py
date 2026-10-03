@@ -68,6 +68,18 @@ class PopupMenuTests(unittest.TestCase):
         m.unpost()
         self.assertFalse(sub.is_open() or m.is_open())
 
+    def test_new_menu_nested_on_non_mac(self):
+        import app
+        old = app._is_mac
+        app._is_mac = lambda r: False
+        try:
+            outer = app.new_menu(self.root)
+            inner = app.new_menu(outer)
+        finally:
+            app._is_mac = old
+        self.assertIsInstance(inner, widgets.PopupMenu)
+        self.assertIs(inner.parent, self.root)
+
 
 if __name__ == "__main__":
     unittest.main()
