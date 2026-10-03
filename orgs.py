@@ -3,6 +3,9 @@
 from __future__ import annotations
 
 import re
+import shutil
+import uuid
+from pathlib import Path
 from dataclasses import asdict, dataclass, field, fields
 
 import storage
@@ -57,6 +60,9 @@ class Organization:
     city_in: str = "г. Таганроге"      # «в г. Таганроге» (для текста заявления)
     license_text: str = ""             # «№ 679 от 18.05.2021» — уведомление о предоставлении лицензии
     poa_text: str = ""                 # «23.08.2022г.» — дата доверенности представителя
+    # --- доверенности на представителя, который отправляет документы (файлы docx в ~/.debtors/poa) ---
+    poa_mail: str = ""                 # имя файла доверенности для почты (письмо в ЕИРЦ)
+    poa_court: str = ""                # имя файла доверенности для суда (заявления о судебном приказе)
 
     def __post_init__(self):
         # совместимость: раньше дома были просто строками-адресами
@@ -124,6 +130,46 @@ def load_orgs() -> list[Organization]:
     except Exception:
         pass
     return default_orgs()
+
+
+POA_KINDS = {"mail": "для почты", "court": "для суда"}
+
+
+def poa_path(name: str) -> Path | None:
+    """Путь к сохранённому файлу доверенности; None, если не задан или файл пропал."""
+    if not name or Path(name).name != name:
+        return None
+    p = storage.POA_DIR / name
+    return p if p.is_file() else None
+
+
+def import_poa(src, kind: str, old: str = "") -> str:
+    """Копирует docx доверенности в папку данных программы и возвращает сохранённое имя (прежний файл заменяется)."""
+    src = Path(src)
+    if src.suffix.lower() != ".docx":
+        raise ValueError("Доверенность должна быть файлом Word (.docx).")
+    storage.POA_DIR.mkdir(parents=True, exist_ok=True)
+    name = f"{uuid.uuid4().hex}-{kind}.docx"
+    shutil.copyfile(src, storage.POA_DIR / name)
+    remove_poa(old)
+    return name
+
+
+def remove_poa(name: str) -> None:
+    p = poa_path(name)
+    if p:
+        p.unlink(missing_ok=True)
+
+
+def copy_poa(org: "Organization", kind: str, out_dir) -> Path | None:
+    """Кладёт доверенность организации (kind: mail/court) в папку с документами. None — доверенность не задана."""
+    p = poa_path(getattr(org, f"poa_{kind}"))
+    if p is None:
+        return None
+    label = re.sub(r'[\\/:*?"<>|«»]', "", org.name).strip()
+    dest = Path(out_dir) / f"Доверенность {POA_KINDS[kind]} {label}.docx"
+    shutil.copyfile(p, dest)
+    return dest
 
 
 def save_orgs(orgs: list[Organization]) -> None:

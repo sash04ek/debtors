@@ -1511,7 +1511,9 @@ class App(tk.Tk):
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сформировать письмо:\n{e}")
             return
-        self.finish_docs("Готово", f"Адресов в письме: {n}\nОрганизация: {org.name}\n{path}", out)
+        poa = orgmod.copy_poa(org, "mail", out)
+        note = f"\nДоверенность: {poa.name}" if poa else "\nДоверенность для почты не задана (Организации → Доверенности)."
+        self.finish_docs("Готово", f"Адресов в письме: {n}\nОрганизация: {org.name}\n{path}{note}", out)
 
     def _gen_court(self, org, pick, out: Path, jobs):
         data = courtsmod.load()
@@ -1579,6 +1581,9 @@ class App(tk.Tk):
                      "Проверьте ставки в Настройки → Госпошлина → «Таблица ставок…».")
         if prog.cancelled:
             note += "\n\nСоздание прервано пользователем."
+        poa = orgmod.copy_poa(org, "court", out) if n_known + n_unknown else None
+        note += (f"\n\nДоверенность: {poa.name}" if poa else
+                 "\n\nДоверенность для суда не задана (Организации → Доверенности).") if n_known + n_unknown else ""
         self.finish_docs("Готово", f"Заявлений: {n_known + n_unknown}\n"
                                    f"• с ФИО собственника: {n_known}\n• собственник неизвестен: {n_unknown}\n"
                                    f"Организация: {org.name}\nПапка: {out}{note}", out)
@@ -3572,6 +3577,8 @@ class OrgDialog(Dialog):
         nb.add(g, text="Письмо в ЕИРЦ")
         h = ttk.Frame(nb)
         nb.add(h, text="Судебный приказ")
+        poa = ttk.Frame(nb)
+        nb.add(poa, text="Доверенности")
         self.name = tk.StringVar(); self.match = tk.StringVar(); self.agent = tk.StringVar()
         self.agent_addr = tk.StringVar(); self.days = tk.StringVar()
 
@@ -3646,6 +3653,25 @@ class OrgDialog(Dialog):
                   wraplength=760, justify="left",
                   style="Muted.TLabel").pack(anchor="w", pady=(8, 0))
 
+        # --- вкладка «Доверенности»: docx на человека, который отправляет документы ---
+        ttk.Label(poa, text="Доверенность на представителя, который отправляет документы организации. Файл копируется в папку "
+                  "данных программы и кладётся рядом с документами при их создании: доверенность для почты — вместе с письмом "
+                  "в ЕИРЦ, доверенность для суда — вместе с заявлениями о судебном приказе.",
+                  wraplength=760, justify="left", style="Muted.TLabel").pack(anchor="w", pady=(6, 10))
+        self.poa_lbls = {}
+        for kind, title in (("mail", "Доверенность для почты"), ("court", "Доверенность для суда")):
+            box = ttk.Frame(poa)
+            box.pack(fill="x", pady=(0, 12))
+            ttk.Label(box, text=title, font=("", 12, "bold")).pack(anchor="w")
+            lbl = ttk.Label(box, text="", style="Muted.TLabel")
+            lbl.pack(anchor="w", pady=(2, 4))
+            self.poa_lbls[kind] = lbl
+            btns = ttk.Frame(box)
+            btns.pack(anchor="w")
+            ttk.Button(btns, text="Выбрать файл .docx…", command=lambda k=kind: self.choose_poa(k)).pack(side="left")
+            ttk.Button(btns, text="Открыть", command=lambda k=kind: self.open_poa(k)).pack(side="left", padx=6)
+            ttk.Button(btns, text="Убрать", command=lambda k=kind: self.clear_poa(k)).pack(side="left")
+
         ttk.Button(left, text="Сохранить и закрыть", command=self.save).pack(fill="x", pady=(16, 0))
         self.refresh(selected)
         if focus_address:                                       # пришли из карточки собственника — сразу к нужному дому
@@ -3702,7 +3728,41 @@ class OrgDialog(Dialog):
         for w, v in ((self.header, o.header), (self.body, o.body),
                      (self.l_header, o.letter_header), (self.l_to, o.letter_to), (self.l_body, o.letter_body)):
             w.delete("1.0", "end"); w.insert("1.0", v)
+        self.show_poa()
         self.lb.delete(self.cur); self.lb.insert(self.cur, o.name); self.lb.selection_set(self.cur)
+
+    def show_poa(self):
+        o = self.orgs[self.cur]
+        for kind, lbl in self.poa_lbls.items():
+            name = getattr(o, f"poa_{kind}")
+            lbl.config(text="Файл загружен" if orgmod.poa_path(name) else "Не задана")
+
+    def choose_poa(self, kind: str):
+        p = filedialog.askopenfilename(parent=self, title=f"Доверенность {orgmod.POA_KINDS[kind]}",
+                                       filetypes=[("Документ Word", "*.docx")])
+        if not p:
+            return
+        o = self.orgs[self.cur]
+        try:
+            setattr(o, f"poa_{kind}", orgmod.import_poa(p, kind, getattr(o, f"poa_{kind}")))
+        except (OSError, ValueError) as e:
+            messagebox.showerror("Доверенность", f"Не удалось загрузить файл:\n{e}", parent=self)
+            return
+        self.show_poa()
+        self.poa_lbls[kind].config(text=f"Загружен: {Path(p).name}")
+
+    def open_poa(self, kind: str):
+        p = orgmod.poa_path(getattr(self.orgs[self.cur], f"poa_{kind}"))
+        if p is None:
+            messagebox.showinfo("Доверенность", "Доверенность не задана.", parent=self)
+            return
+        open_folder(p)
+
+    def clear_poa(self, kind: str):
+        o = self.orgs[self.cur]
+        orgmod.remove_poa(getattr(o, f"poa_{kind}"))
+        setattr(o, f"poa_{kind}", "")
+        self.show_poa()
 
     def std_text(self):
         self.commit()
@@ -3720,6 +3780,8 @@ class OrgDialog(Dialog):
             messagebox.showinfo("Организации", "Должна остаться хотя бы одна организация.", parent=self)
             return
         if messagebox.askyesno("Удалить", f"Удалить «{self.orgs[self.cur].name}»?", parent=self):
+            for kind in orgmod.POA_KINDS:
+                orgmod.remove_poa(getattr(self.orgs[self.cur], f"poa_{kind}"))
             del self.orgs[self.cur]
             self.cur = None
             self.refresh()
