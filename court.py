@@ -45,7 +45,7 @@ def _plain(a) -> str:
 
 
 def _surname_first(name: str) -> str:
-    """«В. Е. Павличенко» → «Павличенко В. Е.»."""
+    """«А. А. Иванов» → «Иванов А. А.»."""
     parts = name.split()
     if len(parts) >= 2 and all(re.fullmatch(r"[А-ЯЁA-Z]\.?", p) for p in parts[:-1]):
         return " ".join([parts[-1]] + parts[:-1])

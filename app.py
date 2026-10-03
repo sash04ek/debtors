@@ -3642,7 +3642,7 @@ class OrgDialog(Dialog):
         self.sign_role = tk.StringVar(); self.sign_name = tk.StringVar()
         self.city = tk.StringVar(); self.l_days = tk.StringVar()
         lrow("Должность подписанта", self.sign_role)
-        lrow("Подписант (В. Е. Павличенко)", self.sign_name)
+        lrow("Подписант (А. А. Иванов)", self.sign_name)
         lrow("Город в адресах", self.city)
         lrow("Срок ответа ЕИРЦ, дней", self.l_days)
 

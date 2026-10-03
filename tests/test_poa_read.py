@@ -11,9 +11,9 @@ TEXT = [
     "ДОВЕРЕННОСТЬ",
     "г. Таганрог «23» августа 2022 г.",
     "ООО УО «ДомСервис», в лице директора Сидорова Петра Ивановича, паспорт выдан 12.05.2015, настоящей доверенностью "
-    "доверяет Павличенко Виктории Евгеньевне представлять интересы общества в судах.",
+    "доверяет Иванову Алексею Алексеевичу представлять интересы общества в судах.",
     "Директор ______ Сидоров П. И.",
-    "Представитель ______ Павличенко В. Е.",
+    "Представитель ______ Иванов А. А.",
 ]
 
 
@@ -27,7 +27,7 @@ class ParseTests(unittest.TestCase):
     def test_date_and_name_from_signature(self):
         text = "\n".join(TEXT)
         self.assertEqual(poa.parse_date(text), "23.08.2022г.")
-        self.assertEqual(poa.parse_representative(text), "В. Е. Павличенко")
+        self.assertEqual(poa.parse_representative(text), "А. А. Иванов")
 
     def test_numeric_date_and_passport_date_skipped(self):
         self.assertEqual(poa.parse_date("паспорт выдан 01.02.2010. Доверенность от 23.08.2022"), "23.08.2022г.")
@@ -57,8 +57,8 @@ class ApplyTests(unittest.TestCase):
     def test_court_fills_date_and_name_once(self):
         org = orgs.Organization(name="О")
         org.poa_court = orgs.import_poa(self.src, "court")
-        self.assertEqual(orgs.apply_poa_data(org, "court"), {"sign_name": "В. Е. Павличенко", "poa_text": "23.08.2022г."})
-        self.assertEqual((org.poa_text, org.sign_name), ("23.08.2022г.", "В. Е. Павличенко"))
+        self.assertEqual(orgs.apply_poa_data(org, "court"), {"sign_name": "А. А. Иванов", "poa_text": "23.08.2022г."})
+        self.assertEqual((org.poa_text, org.sign_name), ("23.08.2022г.", "А. А. Иванов"))
         org.sign_name = "Правка вручную"
         self.assertEqual(orgs.apply_poa_data(org, "court"), {})                # второй раз файл не читается
         self.assertEqual(org.sign_name, "Правка вручную")
@@ -66,7 +66,7 @@ class ApplyTests(unittest.TestCase):
     def test_mail_gives_only_name(self):
         org = orgs.Organization(name="О")
         org.poa_mail = orgs.import_poa(self.src, "mail")
-        self.assertEqual(orgs.apply_poa_data(org, "mail"), {"sign_name": "В. Е. Павличенко"})
+        self.assertEqual(orgs.apply_poa_data(org, "mail"), {"sign_name": "А. А. Иванов"})
         self.assertEqual(org.poa_text, "")
 
     def test_saved_files_fill_only_empty_fields(self):

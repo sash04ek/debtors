@@ -1,4 +1,4 @@
-"""Чтение доверенностей (.docx и .doc): из текста достаются дата доверенности и представитель (В. Е. Павличенко)."""
+"""Чтение доверенностей (.docx и .doc): из текста достаются дата доверенности и представитель (А. А. Иванов)."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def _nominative(surname: str, female: bool) -> str:
 
 
 def parse_representative(text: str) -> str:
-    """Представитель: «В. Е. Павличенко». ФИО берётся после слов «доверяет/уполномочивает», фамилия уточняется по подписи."""
+    """Представитель: «А. А. Иванов». ФИО берётся после слов «доверяет/уполномочивает», фамилия уточняется по подписи."""
     flat = re.sub(r"\s+", " ", text)
     start = _TRIGGER.search(flat)
     if not start:
@@ -108,7 +108,7 @@ def parse_representative(text: str) -> str:
 
 
 def parse(path) -> dict:
-    """{"date": "23.08.2022г.", "name": "В. Е. Павличенко"} — только то, что удалось определить."""
+    """{"date": "23.08.2022г.", "name": "А. А. Иванов"} — только то, что удалось определить."""
     text = read_text(path)
     out = {"date": parse_date(text), "name": parse_representative(text)}
     return {k: v for k, v in out.items() if v}
