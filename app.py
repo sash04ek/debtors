@@ -432,21 +432,12 @@ def _sun_valley(root: tk.Tk, dark: bool) -> bool:
     return True
 
 
-def style_menu(menu: tk.Menu) -> None:
-    """Цвета текущей темы для меню Windows (пункты рисует Tk; на macOS меню системные — ничего не делает)."""
-    colors = getattr(menu.nametowidget("."), "theme_colors", None)
-    if not colors:
-        return
-    fg, bg, _field = colors
-    menu.configure(background=bg, foreground=fg, activebackground=widgets.mix(menu, bg, fg, 0.14), activeforeground=fg,
-                   disabledforeground=widgets.mix(menu, fg, bg, 0.55), borderwidth=1, relief="flat")
-
-
-def new_menu(parent: tk.Misc, **kw) -> tk.Menu:
-    """Меню без «отрывной» полоски, в цветах темы программы."""
-    menu = tk.Menu(parent, tearoff=0, **kw)
-    style_menu(menu)
-    return menu
+def new_menu(parent: tk.Misc, **kw):
+    """Меню. На macOS — системное (tk.Menu). На Windows/Linux — меню, нарисованное Tk (widgets.PopupMenu): системное меню Windows
+    остаётся светлым в тёмной теме (рамка, разделители)."""
+    if _is_mac(parent):
+        return tk.Menu(parent, tearoff=0, **kw)
+    return widgets.PopupMenu(parent, postcommand=kw.get("postcommand"))
 
 
 def set_dark_menus(dark: bool) -> None:
@@ -517,11 +508,6 @@ def apply_theme(root: tk.Tk, mode: str) -> None:
             st.map("Treeview", background=[("selected", "#0078d7")], foreground=[("selected", "#ffffff")])
             root.configure(background=st.lookup("TFrame", "background") or "SystemButtonFace")
         set_dark_menus(dark)
-        for m in getattr(root, "menus", {}).values():           # меню строки меню, созданные до смены темы
-            style_menu(m)
-            for i in range(m.index("end") + 1 if m.index("end") is not None else 0):
-                if m.type(i) == "cascade":
-                    style_menu(m.nametowidget(m.entrycget(i, "menu")))
         for w in [root] + [c for c in root.winfo_children() if isinstance(c, tk.Toplevel)]:
             set_titlebar_dark(w, dark)                          # заголовки уже открытых окон
     apply_palette(root)

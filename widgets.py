@@ -338,3 +338,183 @@ def retheme(widget: tk.Misc) -> None:
         for c in w.winfo_children():
             walk(c)
     walk(widget)
+
+
+class PopupMenu:
+    """Всплывающее меню, нарисованное самим Tk (Windows/Linux): системное меню Windows не поддаётся тёмной теме — светлые
+    рамка, разделители и фон. Набор методов — как у tk.Menu (add_command, add_checkbutton, add_separator, add_cascade, delete,
+    entryconfig, tk_popup, unpost), поэтому остальной код не отличает одно от другого. Цвета берутся у темы в момент показа."""
+
+    def __init__(self, parent: tk.Misc, postcommand=None):
+        self.parent, self.postcommand = parent, postcommand
+        self.entries: list[dict] = []
+        self._win: tk.Toplevel | None = None
+        self._child: "PopupMenu | None" = None
+        self._owner: "PopupMenu | None" = None
+        self._prev_grab = None
+
+    # --- описание пунктов ---
+    def add_command(self, label: str = "", command=None, accelerator: str = "", state: str = "normal", **_ignored) -> None:
+        self.entries.append({"type": "command", "label": label, "command": command, "accelerator": accelerator, "state": state})
+
+    def add_checkbutton(self, label: str = "", variable: tk.Variable | None = None, command=None, accelerator: str = "",
+                        state: str = "normal", **_ignored) -> None:
+        self.entries.append({"type": "checkbutton", "label": label, "variable": variable, "command": command,
+                             "accelerator": accelerator, "state": state})
+
+    def add_separator(self) -> None:
+        self.entries.append({"type": "separator"})
+
+    def add_cascade(self, label: str = "", menu: "PopupMenu | None" = None, state: str = "normal", **_ignored) -> None:
+        self.entries.append({"type": "cascade", "label": label, "menu": menu, "state": state})
+
+    def delete(self, first, last=None) -> None:
+        if first == 0 and last in (None, "end"):
+            self.entries.clear()
+        else:
+            end = len(self.entries) if last in (None, "end") else int(last) + 1
+            del self.entries[int(first):end]
+
+    def index(self, what):
+        return len(self.entries) - 1 if what == "end" and self.entries else None
+
+    def type(self, i: int) -> str:
+        return self.entries[i]["type"]
+
+    def entryconfig(self, i: int, **kw) -> None:
+        self.entries[i].update(kw)
+
+    entryconfigure = entryconfig
+
+    def entrycget(self, i: int, key: str):
+        return self.entries[i].get(key)
+
+    # --- показ ---
+    def is_open(self) -> bool:
+        return self._win is not None and self._win.winfo_exists()
+
+    def _root(self) -> "PopupMenu":
+        return self._owner._root() if self._owner else self
+
+    def tk_popup(self, x: int, y: int) -> None:
+        self.unpost()
+        if self.postcommand:
+            self.postcommand()
+        if not self.entries:
+            return
+        top = self._owner is None
+        pal = palette(self.parent)
+        bg, fg, line = pal["bg"], pal["fg"], pal["line"]
+        hover, muted = mix(self.parent, bg, fg, 0.14), pal["muted"]
+        win = self._win = tk.Toplevel(self.parent)
+        win.withdraw()
+        win.overrideredirect(True)
+        try:
+            win.wm_attributes("-topmost", True)
+        except tk.TclError:
+            pass
+        outer = tk.Frame(win, bg=line, padx=1, pady=1)
+        outer.pack()
+        inner = tk.Frame(outer, bg=bg, pady=4)
+        inner.pack()
+        widgets_by_row: list[tuple[tk.Frame, list[tk.Label]]] = []
+        for i, e in enumerate(self.entries):
+            if e["type"] == "separator":
+                tk.Frame(inner, height=1, bg=line).pack(fill="x", padx=8, pady=4)
+                continue
+            enabled = e.get("state", "normal") != "disabled"
+            color = fg if enabled else muted
+            row = tk.Frame(inner, bg=bg, padx=6)
+            row.pack(fill="x", padx=4)
+            mark = "✓" if e["type"] == "checkbutton" and e["variable"] is not None and e["variable"].get() else ""
+            labels = [tk.Label(row, text=mark, bg=bg, fg=color, width=2, anchor="w")]
+            labels.append(tk.Label(row, text=e["label"], bg=bg, fg=color, anchor="w"))
+            labels[0].pack(side="left")
+            labels[1].pack(side="left", fill="x", expand=True, padx=(0, 28))
+            tail = "›" if e["type"] == "cascade" else e.get("accelerator", "")
+            if tail:
+                labels.append(tk.Label(row, text=tail, bg=bg, fg=muted if e["type"] != "cascade" else color, anchor="e"))
+                labels[-1].pack(side="right")
+            widgets_by_row.append((row, labels))
+            if not enabled:
+                continue
+            for w in [row] + labels:
+                w.bind("<Enter>", lambda ev, r=row, ls=labels, e=e: self._hover(r, ls, hover, e), add="+")
+                w.bind("<Leave>", lambda ev, r=row, ls=labels: self._unhover(r, ls, bg), add="+")
+                w.bind("<ButtonRelease-1>", lambda ev, e=e, r=row: self._invoke(e, r), add="+")
+        win.update_idletasks()
+        w, h = win.winfo_reqwidth(), win.winfo_reqheight()
+        sw, sh = win.winfo_screenwidth(), win.winfo_screenheight()
+        x = max(0, min(x, sw - w))
+        y = max(0, min(y, sh - h - 40)) if y + h > sh - 40 else y
+        win.geometry(f"+{x}+{y}")
+        win.deiconify()
+        win.lift()
+        if top:
+            self._prev_grab = self.parent.grab_current()
+            try:
+                win.grab_set()                                  # клик вне меню приходит сюда и закрывает его
+            except tk.TclError:
+                pass
+            win.bind("<Button-1>", self._click_outside, add="+")
+            win.bind("<Escape>", lambda e: self.unpost())
+            try:
+                win.focus_force()
+            except tk.TclError:
+                pass
+
+    @staticmethod
+    def _hover(row, labels, color, entry=None) -> None:
+        row.configure(bg=color)
+        for lbl in labels:
+            lbl.configure(bg=color)
+
+    @staticmethod
+    def _unhover(row, labels, color) -> None:
+        row.configure(bg=color)
+        for lbl in labels:
+            lbl.configure(bg=color)
+
+    def _click_outside(self, event) -> None:
+        for m in (self, self._child):
+            if m is not None and m.is_open():
+                x, y = m._win.winfo_rootx(), m._win.winfo_rooty()
+                if x <= event.x_root <= x + m._win.winfo_width() and y <= event.y_root <= y + m._win.winfo_height():
+                    return
+        self.unpost()
+
+    def _invoke(self, entry: dict, row: tk.Frame) -> None:
+        if entry["type"] == "cascade":
+            sub = entry["menu"]
+            if sub is not None:
+                if self._child is not None and self._child is not sub:
+                    self._child.unpost()
+                self._child = sub
+                sub._owner = self
+                sub.tk_popup(row.winfo_rootx() + row.winfo_width() - 4, row.winfo_rooty() - 4)
+            return
+        if entry["type"] == "checkbutton" and entry.get("variable") is not None:
+            entry["variable"].set(not entry["variable"].get())
+        command = entry.get("command")
+        self._root().unpost()
+        if command:
+            self.parent.after_idle(command)                     # команда выполняется уже после закрытия меню
+
+    def unpost(self) -> None:
+        if self._child is not None:
+            self._child.unpost()
+            self._child = None
+        if self._win is not None:
+            try:
+                if self._owner is None:
+                    self._win.grab_release()
+                self._win.destroy()
+            except tk.TclError:
+                pass
+            self._win = None
+            if self._owner is None and self._prev_grab is not None:
+                try:
+                    self._prev_grab.grab_set()                  # диалогу возвращается его модальность
+                except tk.TclError:
+                    pass
+                self._prev_grab = None

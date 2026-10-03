@@ -4,7 +4,6 @@ import os
 import sys
 import tempfile
 import time
-import tkinter as tk
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -82,22 +81,14 @@ def main():
     a.show_rows(headers, rows, numbered=True)
     settle(a)
     shot(a, f"{mode_tag}-06-main-result")
-    # открытое меню «Файл» и контекстное меню таблицы (системные, должны быть в теме программы)
+    # открытое меню «Файл»: рисуется самим Tk, поэтому снимок делаем обычным способом
     menu = a.menus["Файл"]
     btn = [b for b in a.menubar_frame.winfo_children()][0]
-    # системное меню модальное (tk_popup не возвращается, пока оно открыто), поэтому снимок и закрытие (Esc) — из другого потока
-    import ctypes
-    import threading
-    x, y, w, h = a.winfo_rootx(), a.winfo_rooty(), a.winfo_width(), a.winfo_height()
-
-    def worker():
-        time.sleep(1.2)
-        ImageGrab.grab(bbox=(max(0, x - 8), max(0, y - 40), x + w + 8, y + 330), all_screens=True).save(OUT / f"{mode_tag}-07-menu-file.png")
-        for flag in (0, 2):                                      # нажатие и отпускание Esc
-            ctypes.windll.user32.keybd_event(0x1B, 0, flag, 0)
-    threading.Thread(target=worker, daemon=True).start()
     menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
-    settle(a, 0.3)
+    settle(a, 0.5)
+    x, y, w = a.winfo_rootx(), a.winfo_rooty(), a.winfo_width()
+    ImageGrab.grab(bbox=(max(0, x - 8), max(0, y - 40), x + w + 8, y + 330), all_screens=True).save(OUT / f"{mode_tag}-07-menu-file.png")
+    menu.unpost()
     a.destroy()
 
 
