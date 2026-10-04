@@ -98,11 +98,10 @@ class _AquaSwitch(tk.Canvas):
             self.command()
 
     def _pill(self, x0, y0, x1, y1, color):
-        """«Таблетка»: два круга и прямоугольник между ними (штатные овалы Tk сглажены, многоугольники и толстые линии — нет)."""
+        """«Таблетка»: толстая линия со скруглёнными концами (один объект — без стыков между кругами и прямоугольником)."""
         h = y1 - y0
-        self.create_oval(x0, y0, x0 + h, y1, fill=color, outline="")
-        self.create_oval(x1 - h, y0, x1, y1, fill=color, outline="")
-        self.create_rectangle(x0 + h / 2, y0, x1 - h / 2, y1, fill=color, outline="")
+        cy = (y0 + y1) / 2
+        self.create_line(x0 + h / 2, cy, x1 - h / 2, cy, width=h, capstyle="round", fill=color)
 
     def redraw(self, pal: dict | None = None):
         self.pal = pal or self.pal
@@ -119,10 +118,10 @@ class _AquaSwitch(tk.Canvas):
         x = m + w - 2 - d if on else m + 2
         y = m + 2
         try:
-            shadow = mix(self, color, "#000000", 0.35)
+            shadow = mix(self, color, "#000000", 0.12)
         except tk.TclError:
             shadow = "#555555"
-        self.create_oval(x - 0.5, y + 0.5, x + d + 0.5, y + d + 1.5, fill=shadow, outline="")      # мягкая тень под кнопкой
+        self.create_oval(x, y + 0.5, x + d, y + d + 0.5, fill=shadow, outline="")                  # лёгкая тень под кнопкой
         self.create_oval(x, y, x + d, y + d, fill="#ffffff", outline="")
 
 
