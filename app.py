@@ -3404,8 +3404,8 @@ class OwnerDialog(Dialog):
                 var.trace_add("write", lambda *a: self._sync())
         self.unknown = tk.BooleanVar(value=self.card.unknown)
         self.unknown.trace_add("write", lambda *a: self.update_mode())
-        urow = ttk.Frame(obox)
-        urow.pack(fill="x", pady=(6, 0))
+        urow = ttk.Frame(form)                  # вне рамки группы: у рамки на macOS свой оттенок фона, и вокруг переключателя был бы прямоугольник
+        urow.pack(fill="x", padx=8, pady=(8, 2))
         ttk.Label(urow, text="Собственники неизвестны (шаблон без ФИО)").pack(side="left")
         widgets.Switch(urow, self.unknown, surface="window").pack(side="right")
 
