@@ -35,7 +35,7 @@ def org_issues(kind: str, org: orgmod.Organization) -> list[str]:
 
 
 def row_issues(kind: str, org: orgmod.Organization, address: str, card_ok: bool = True, court_ok: bool = True,
-               today=None, card_full: bool = True) -> list[str]:
+               today=None, card_full: bool = True, claim_sent: str = "") -> list[str]:
     """Проблемы одного адреса. Дома проверяются, только если у организации ведётся список домов."""
     miss: list[str] = []
     if kind == "court":
@@ -45,6 +45,8 @@ def row_issues(kind: str, org: orgmod.Organization, address: str, card_ok: bool 
             miss.append("карточка заполнена не полностью")
         if not court_ok:
             miss.append("нет участка")
+    if kind == "claims" and claim_sent:
+        miss.append(f"претензия уже отправлена {claim_sent}")
     if org.houses:
         house = orgmod.find_house(org, address)
         if house is None:
