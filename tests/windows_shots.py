@@ -104,6 +104,7 @@ def main():
     owners.save_card(owners.Card(address="Тестовая ул 1", flat="2", owners=[owners.Owner(passport="0000 000000")]))   # ⚠
     claimlog.mark_sent([("Тестовая ул 1", "1")], date.today() - timedelta(days=5))                    # ✉ ждём ответа
     claimlog.mark_sent([("Тестовая ул 1", "2"), ("Тестовая ул 1", "3")], date.today() - timedelta(days=50))   # ⚠ срок истёк
+    claimlog.mark_court([("Тестовая ул 1", "3"), ("Тестовая ул 1", "4")], date.today() - timedelta(days=3))   # «в суд дд.мм.гг»
     a.result = core.Result(headers, rows, [r[3] for r in rows], {})
     a.show_rows(headers, rows, numbered=True)
     settle(a)
