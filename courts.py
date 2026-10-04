@@ -108,7 +108,7 @@ class DownloadError(Exception):
     """Не удалось загрузить список (текст можно показывать пользователю)."""
 
 
-def _ssl_context() -> ssl.SSLContext:
+def ssl_context() -> ssl.SSLContext:
     """Сертификаты берём из certifi: у Python с python.org на macOS нет корневых сертификатов."""
     try:
         import certifi
@@ -119,7 +119,7 @@ def _ssl_context() -> ssl.SSLContext:
 
 def _default_urlopen(url, timeout: float = 90):
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    return urllib.request.urlopen(req, timeout=timeout, context=_ssl_context())
+    return urllib.request.urlopen(req, timeout=timeout, context=ssl_context())
 
 
 _ENTRY = re.compile(r"\{type:'mir',name:'((?:[^'\\]|\\.)*)',adress:'((?:[^'\\]|\\.)*)',coord:")

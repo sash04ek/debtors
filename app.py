@@ -6,8 +6,10 @@ import os
 import re
 import subprocess
 import sys
+import threading
 import tkinter as tk
 import tkinter.font as tkfont
+import webbrowser
 from dataclasses import asdict, replace
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
@@ -21,6 +23,7 @@ import duty
 import courts as courtsmod
 import orgs as orgmod
 import precheck
+import updates
 import owners
 import storage
 import widgets
@@ -598,6 +601,7 @@ class App(tk.Tk):
         self.apply_table_font()
         self.update_hint()
         self.after(150, self.restore_last_state)          # прошлое состояние восстанавливаем, когда окно уже показано
+        self._update_jobs = [self.after(2500, self.start_update_check)]       # проверка обновлений — тихо, не чаще раза в сутки
         if FIRST_RUN and not self.settings.welcomed:
             self.after(500, lambda: WelcomeDialog(self))
 
@@ -607,6 +611,7 @@ class App(tk.Tk):
 
         top = ttk.Frame(self)
         top.pack(fill="x", **pad)
+        self._top = top                                  # плашка об обновлении встаёт над этой строкой
         ttk.Button(top, text="Открыть Excel…", command=self.open_file).pack(side="left")
         self.recent_btn = ttk.Button(top, text="▾", width=2, command=self.show_recent_menu)
         self.recent_btn.pack(side="left", padx=(2, 0))
@@ -651,6 +656,7 @@ class App(tk.Tk):
         self.only_managed = tk.BooleanVar(value=self.settings.only_managed)
         self.duty_auto = tk.BooleanVar(value=self.settings.duty_auto)
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
+        self.update_var = tk.BooleanVar(value=self.settings.update_check)
         self.auto_filter_var = tk.BooleanVar(value=self.settings.auto_filter)
         self.native_date_var = tk.BooleanVar(value=self.settings.native_datepicker)
         datepicker.USE_NATIVE = self.settings.native_datepicker
@@ -1127,12 +1133,12 @@ class App(tk.Tk):
             self.save_state()
 
     def destroy(self):
-        job = getattr(self, "_search_job", None)
-        if job:
-            try:
-                self.after_cancel(job)                               # отложенный поиск не должен сработать в закрытом окне
-            except Exception:
-                pass
+        for job in [getattr(self, "_search_job", None), *getattr(self, "_update_jobs", [])]:
+            if job:
+                try:
+                    self.after_cancel(job)                           # отложенные вызовы не должны сработать в закрытом окне
+                except Exception:
+                    pass
         super().destroy()
 
     def on_close(self):
@@ -1171,6 +1177,7 @@ class App(tk.Tk):
         if mac:
             apple = tk.Menu(bar, name="apple", tearoff=0)                              # меню приложения
             apple.add_command(label="О программе «Должники»", command=self.show_about)  # «Настройки…», «Скрыть», «Завершить» добавляет система
+            apple.add_command(label="Проверить обновления…", command=lambda: self.start_update_check(manual=True))
             bar.add_cascade(menu=apple)
             self.createcommand("tkAboutDialog", self.show_about)
             self.createcommand("::tk::mac::ShowPreferences", self.open_settings)
@@ -1199,6 +1206,7 @@ class App(tk.Tk):
             self.configure(menu=bar)                            # на macOS — системная строка меню
         else:
             help_menu = new_menu(self)
+            help_menu.add_command(label="Проверить обновления…", command=lambda: self.start_update_check(manual=True))
             help_menu.add_command(label="О программе", command=self.show_about)
             self.menus["Справка"] = help_menu
             self._build_tk_menubar()
@@ -1230,11 +1238,69 @@ class App(tk.Tk):
         else:
             w.event_generate(event)
 
-    def show_about(self):
+    @staticmethod
+    def app_version() -> str:
         try:
             from version import VERSION
         except ImportError:
-            VERSION = "разработка"
+            return "разработка"
+        return VERSION
+
+    # ---------- обновления ----------
+    def start_update_check(self, manual: bool = False) -> None:
+        """Узнаёт о новой версии в фоне. Автоматически — при запуске, не чаще раза в сутки и только если включено в настройках."""
+        today = date.today().isoformat()
+        if not manual and (not self.update_var.get() or self.settings.update_checked == today
+                           or updates.parse_version(self.app_version()) is None):
+            return
+        box: list = []
+        threading.Thread(target=lambda: box.append(updates.check(self.app_version())), daemon=True).start()
+        self._poll_update(box, manual, today)
+
+    def _poll_update(self, box: list, manual: bool, today: str) -> None:
+        if not box:
+            self._update_jobs.append(self.after(200, lambda: self._poll_update(box, manual, today)))
+            return
+        status, info = box[0]
+        if status in ("newer", "current"):
+            self.settings.update_checked = today
+            self.save_settings_now()
+        if manual:
+            if status == "newer":
+                if messagebox.askyesno("Обновление", f"Доступна версия {info['tag']} (у вас {self.app_version()}).\n\nОткрыть страницу загрузки?"):
+                    webbrowser.open(info["url"])
+            elif status == "current":
+                messagebox.showinfo("Обновление", f"Установлена последняя версия ({self.app_version()}).")
+            elif status == "dev":
+                messagebox.showinfo("Обновление", "Это сборка для разработки: номера версии нет, сравнивать не с чем.")
+            else:
+                messagebox.showinfo("Обновление", "Не удалось проверить обновления. Проверьте подключение к интернету и повторите.")
+        elif status == "newer" and info["tag"] != self.settings.update_skipped:
+            self.show_update_bar(info)
+
+    def show_update_bar(self, info: dict) -> None:
+        """Плашка над панелью инструментов: «Доступна версия …» с кнопками «Скачать», «Не напоминать об этой версии», «✕»."""
+        self.hide_update_bar()
+        bar = self.update_bar = ttk.Frame(self)
+        ttk.Label(bar, text=f"Доступна новая версия {info['tag']} (у вас {self.app_version()}).", style="Warn.TLabel").pack(side="left", padx=(8, 8))
+        ttk.Button(bar, text="Скачать", command=lambda: webbrowser.open(info["url"])).pack(side="left")
+        ttk.Button(bar, text="Не напоминать об этой версии", command=lambda: self.skip_update(info["tag"])).pack(side="left", padx=6)
+        ttk.Button(bar, text="✕", width=2, command=self.hide_update_bar).pack(side="right", padx=6)
+        bar.pack(fill="x", before=self._top, pady=(4, 0))
+
+    def hide_update_bar(self) -> None:
+        bar = getattr(self, "update_bar", None)
+        if bar is not None:
+            bar.destroy()
+            self.update_bar = None
+
+    def skip_update(self, tag: str) -> None:
+        self.settings.update_skipped = tag
+        self.save_settings_now()
+        self.hide_update_bar()
+
+    def show_about(self):
+        VERSION = self.app_version()
         messagebox.showinfo("О программе «Должники»", f"Должники\nВерсия: {VERSION}\n\n"
                             "Поиск должников по отчёту ЕИРЦ и формирование документов.\n"
                             f"Данные хранятся на этом компьютере: {storage.DATA_DIR}")
@@ -1763,6 +1829,7 @@ class App(tk.Tk):
         s.only_managed = self.only_managed.get()
         s.duty_auto = self.duty_auto.get()
         s.restore_state = self.restore_var.get()
+        s.update_check = self.update_var.get()
         s.auto_filter = self.auto_filter_var.get()
         s.native_datepicker = self.native_date_var.get()
         datepicker.USE_NATIVE = s.native_datepicker
@@ -2156,6 +2223,10 @@ class SettingsDialog(Dialog):
         self.courts_lbl.pack()
         ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
         ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
+        upd = widgets.section(pages["Общие"], "Обновления")
+        widgets.Switch(upd.row("Проверять при запуске"), app.update_var, command=app.save_settings_now).pack()
+        ttk.Button(upd.row(f"Версия {app.app_version()}"), text="Проверить сейчас",
+                   command=lambda: app.start_update_check(manual=True)).pack()
         dbox = widgets.section(pages["Общие"], "Данные")
         ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
         ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
