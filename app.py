@@ -757,6 +757,8 @@ class App(tk.Tk):
         self.card_flags: list[bool] = []
         self.claim_marks: list[str] = []
         self.claim_state: list[str] = []
+        self.court_marks: list[str] = []
+        self.court_dates: list[date | None] = []
         self.court_flags: list[bool] = []
         self.card_full: list[bool] = []
         self.card_marks: list[str] = []
@@ -1479,10 +1481,12 @@ class App(tk.Tk):
         menu.add_command(label=f"Претензия отправлена — отметить ({n})…", command=self.mark_claims_sent)
         menu.add_command(label="Ответ на претензию получен", command=lambda: self.change_claims("close"))
         menu.add_command(label="Снять отметку об отправке", command=lambda: self.change_claims("unmark"))
+        menu.add_command(label=f"Судебный приказ подан в суд — отметить ({n})…", command=self.mark_court_sent)
+        menu.add_command(label="Снять отметку о подаче приказа", command=lambda: self.change_claims("unmark_court"))
         menu.add_separator()
         menu.add_command(label="Истёк срок ответа на претензии…", command=self.show_claims_due)
         if not n:
-            for i in (0, 1, 2, 4, 5, 6):
+            for i in (0, 1, 2, 4, 5, 6, 7, 8):
                 menu.entryconfig(i, state="disabled")
         b = self.docs_btn
         menu.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
@@ -1516,6 +1520,21 @@ class App(tk.Tk):
         claimlog.mark_sent(items, dlg.result, self.current_org().name)
         self.after_claims_changed()
 
+    def mark_court_sent(self) -> None:
+        """Отметка «судебный приказ отправлен в суд» с датой для отмеченных адресов."""
+        if not self.result or not self.result.top or not self._need_addr_cols("отметки о подаче в суд"):
+            return
+        items = self.picked_addresses()
+        if not items:
+            messagebox.showinfo("Судебный приказ", "Не отмечено ни одного адреса.")
+            return
+        dlg = ClaimSentDialog(self, len(items), 0, court=True)
+        self.wait_window(dlg)
+        if dlg.result is None:
+            return
+        claimlog.mark_court(items, dlg.result, self.current_org().name)
+        self.after_claims_changed()
+
     def change_claims(self, action: str) -> None:
         """«Ответ получен» или «снять отметку» для отмеченных адресов."""
         if not self.result or not self.result.top or not self._need_addr_cols("отметки о претензиях"):
@@ -1524,7 +1543,7 @@ class App(tk.Tk):
         if not items:
             messagebox.showinfo("Претензии", "Не отмечено ни одного адреса.")
             return
-        (claimlog.close if action == "close" else claimlog.unmark)(items)
+        {"close": claimlog.close, "unmark": claimlog.unmark, "unmark_court": claimlog.unmark_court}[action](items)
         self.after_claims_changed()
 
     def after_claims_changed(self) -> None:
@@ -1557,7 +1576,8 @@ class App(tk.Tk):
         rows, counts, claims = [], {}, claimlog._load()
         for k in pick:
             info = self.row_info(k)
-            sent = claimlog.long((claimlog.get(info["address"], info["flat"], claims) or {}).get("sent", ""))
+            rec = claimlog.get(info["address"], info["flat"], claims) or {}
+            sent = claimlog.long(rec.get("court" if kind == "court" else "sent", ""))
             miss = precheck.row_issues(kind, org, info["address"], self.card_flags[k], self.court_flags[k],
                                        card_full=self.card_full[k], claim_sent=sent)
             if miss:
@@ -2152,7 +2172,8 @@ class App(tk.Tk):
             return []
         return [("☑" if self.check_state[idx] else "☐"), idx + 1,
                 self.card_marks[idx] if idx < len(self.card_marks) else "", "✓" if self.court_flags[idx] else "✗",
-                self.claim_marks[idx] if idx < len(self.claim_marks) else ""]
+                self.claim_marks[idx] if idx < len(self.claim_marks) else "",
+                self.court_marks[idx] if idx < len(self.court_marks) else ""]
 
     def compute_card_flags(self):
         """Для каждой строки результата: есть ли карточка с персональными данными собственника."""
@@ -2162,6 +2183,8 @@ class App(tk.Tk):
         self.card_marks = ["✗"] * n                       # ✓ карточка полная, ⚠ неполная, ✗ карточки нет
         self.claim_marks = [""] * n                       # претензия: «✉ 04.10.26» отправлена, «⚠ 04.10.26» срок ответа истёк, «✓ ответ» получен
         self.claim_state = [""] * n
+        self.court_marks = [""] * n                       # «в суд 04.10.26» — судебный приказ отправлен в суд
+        self.court_dates: list[date | None] = [None] * n
         self.court_flags = [False] * n                    # известен ли судебный участок (в карточке или за домом)
         if not (n and self.result and self.result.top and self.settings.addr_col and self.settings.flat_col):
             return
@@ -2170,6 +2193,10 @@ class App(tk.Tk):
         for idx in range(min(n, len(self.result.top))):
             info = self.row_info(idx)
             rec = claimlog.get(info["address"], info["flat"], claims)
+            filed = claimlog.court_date(rec)
+            if filed:
+                self.court_marks[idx] = f"в суд {filed:%d.%m.%y}"
+                self.court_dates[idx] = filed
             st = self.claim_state[idx] = claimlog.status(rec, days)
             if st:
                 self.claim_marks[idx] = {claimlog.SENT: "✉ ", claimlog.OVERDUE: "⚠ ", claimlog.CLOSED: "✓ "}[st] + (
@@ -2210,6 +2237,8 @@ class App(tk.Tk):
             getter = lambda idx: 1 if self.court_flags[idx] else 0
         elif self.has_checks and ci == 4:
             getter = lambda idx: ({claimlog.OVERDUE: 3, claimlog.SENT: 2, claimlog.CLOSED: 1}.get(self.claim_state[idx], 0), self.claim_marks[idx])
+        elif self.has_checks and ci == 5:
+            getter = lambda idx: self.court_dates[idx] or date.min
         else:
             getter = lambda idx: self.data_rows[idx][j]
         desc = bool(self.view_sort and self.view_sort[0] == colid and not self.view_sort[1])
@@ -2233,7 +2262,7 @@ NEXT_STEPS = (
     ("Создайте документы", "Претензии, письмо в ЕИРЦ и заявления о судебном приказе."),
 )
 
-SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70, "Претензия": 96}      # служебные колонки таблицы результата и их ширина
+SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70, "Претензия": 96, "Приказ": 96}      # служебные колонки таблицы результата и их ширина
 N_SERVICE = len(SERVICE_COLS)
 
 COLUMN_FIELDS = {
@@ -3172,19 +3201,21 @@ class DocsDialog(Dialog):
 class ClaimSentDialog(Dialog):
     """Отметка «претензия отправлена»: дата отправки для выбранных адресов (по умолчанию сегодня)."""
 
-    def __init__(self, app: "App", n: int, days: int):
+    def __init__(self, app: "App", n: int, days: int, court: bool = False):
         super().__init__(app)
-        self.title("Претензия отправлена")
+        self.title("Судебный приказ подан" if court else "Претензия отправлена")
         self.transient(app)
         self.result: date | None = None
         body = ttk.Frame(self, padding=14)
         body.pack(fill="both", expand=True)
-        ttk.Label(body, text=f"Отметить претензии отправленными: {n}", font=("", 13, "bold")).pack(anchor="w")
-        ttk.Label(body, text=f"Через {days} дн. после отправки программа напомнит, что срок ответа истёк.",
+        ttk.Label(body, text=(f"Отметить заявления поданными в суд: {n}" if court else f"Отметить претензии отправленными: {n}"),
+                  font=("", 13, "bold")).pack(anchor="w")
+        ttk.Label(body, text=("Судебный приказ по этим адресам отправлен в суд; напоминание о сроке ответа на претензию по ним снимается."
+                              if court else f"Через {days} дн. после отправки программа напомнит, что срок ответа истёк."),
                   style="Muted.TLabel", wraplength=420, justify="left").pack(anchor="w", pady=(2, 10))
         row = ttk.Frame(body)
         row.pack(anchor="w")
-        ttk.Label(row, text="Дата отправки:").pack(side="left", padx=(0, 8))
+        ttk.Label(row, text="Дата подачи в суд:" if court else "Дата отправки:").pack(side="left", padx=(0, 8))
         self.var = tk.StringVar(value=datepicker.format_date(date.today()))
         datepicker.DateEntry(row, self.var).pack(side="left")
         btns = ttk.Frame(body)
@@ -3199,7 +3230,7 @@ class ClaimSentDialog(Dialog):
     def accept(self):
         d = datepicker.parse_date(self.var.get())
         if d is None or d > date.today():
-            messagebox.showinfo("Дата отправки", "Введите дату отправки в виде дд.мм.гггг (не позже сегодняшней).", parent=self)
+            messagebox.showinfo("Дата", "Введите дату в виде дд.мм.гггг (не позже сегодняшней).", parent=self)
             return
         self.result = d
         self.destroy()

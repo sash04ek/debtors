@@ -1,5 +1,5 @@
-"""Журнал отправленных претензий: по адресу и квартире — дата отправки; через заданное число дней программа напоминает,
-что срок ответа истёк. Хранится в ~/.debtors/claims.json (ключ — как у карточек собственников)."""
+"""Журнал по адресам: дата отправки претензии (через заданное число дней программа напоминает, что срок ответа истёк) и дата
+подачи судебного приказа в суд. Хранится в ~/.debtors/claims.json (ключ — как у карточек собственников)."""
 
 from __future__ import annotations
 
@@ -28,19 +28,40 @@ def key_of(address, flat) -> str:
     return owners.make_key(address, flat)
 
 
+def _rec(data: dict, address, flat, org: str = "") -> dict:
+    """Запись по адресу (создаётся при первой отметке); поля претензии и суда независимы."""
+    rec = data.setdefault(key_of(address, flat), {"address": address, "flat": flat, "org": org, "sent": "", "closed": "", "court": ""})
+    rec.setdefault("court", "")
+    if org:
+        rec["org"] = org
+    return rec
+
+
+def _prune(data: dict) -> None:
+    """Записи, в которых нет ни претензии, ни суда, не храним."""
+    for k in [k for k, r in data.items() if not _day(r.get("sent", "")) and not _day(r.get("court", ""))]:
+        del data[k]
+
+
 def mark_sent(items: list[tuple[str, str]], sent: date, org: str = "") -> int:
     """Отмечает претензии отправленными: items — [(адрес, квартира)]. Повторная отметка заменяет дату и снимает «ответ получен»."""
     data = _load()
     for address, flat in items:
-        data[key_of(address, flat)] = {"address": address, "flat": flat, "org": org, "sent": sent.isoformat(), "closed": ""}
+        rec = _rec(data, address, flat, org)
+        rec["sent"], rec["closed"] = sent.isoformat(), ""
     _save(data)
     return len(items)
 
 
 def unmark(items: list[tuple[str, str]]) -> int:
-    """Убирает отметку об отправке."""
-    data = _load()
-    n = sum(1 for address, flat in items if data.pop(key_of(address, flat), None) is not None)
+    """Убирает отметку об отправке претензии (отметка о подаче в суд остаётся)."""
+    data, n = _load(), 0
+    for address, flat in items:
+        rec = data.get(key_of(address, flat))
+        if rec and rec.get("sent"):
+            rec["sent"] = rec["closed"] = ""
+            n += 1
+    _prune(data)
     _save(data)
     return n
 
@@ -50,11 +71,36 @@ def close(items: list[tuple[str, str]], on: date | None = None) -> int:
     data, n = _load(), 0
     for address, flat in items:
         rec = data.get(key_of(address, flat))
-        if rec:
+        if rec and rec.get("sent"):
             rec["closed"] = (on or date.today()).isoformat()
             n += 1
     _save(data)
     return n
+
+
+def mark_court(items: list[tuple[str, str]], filed: date, org: str = "") -> int:
+    """Отмечает, что по адресу судебный приказ (заявление) отправлен в суд. Напоминание о сроке ответа на претензию снимается."""
+    data = _load()
+    for address, flat in items:
+        _rec(data, address, flat, org)["court"] = filed.isoformat()
+    _save(data)
+    return len(items)
+
+
+def unmark_court(items: list[tuple[str, str]]) -> int:
+    data, n = _load(), 0
+    for address, flat in items:
+        rec = data.get(key_of(address, flat))
+        if rec and rec.get("court"):
+            rec["court"] = ""
+            n += 1
+    _prune(data)
+    _save(data)
+    return n
+
+
+def court_date(rec: dict | None) -> date | None:
+    return _day((rec or {}).get("court", ""))
 
 
 def get(address, flat, data: dict | None = None) -> dict | None:
@@ -79,6 +125,8 @@ def status(rec: dict | None, days: int, today: date | None = None) -> str:
         return ""
     if rec.get("closed"):
         return CLOSED
+    if rec.get("court"):                            # приказ уже подан в суд — ждать ответа на претензию больше не нужно
+        return SENT
     return OVERDUE if (today or date.today()) >= due_date(rec, days) else SENT
 
 

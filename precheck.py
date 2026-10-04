@@ -45,8 +45,8 @@ def row_issues(kind: str, org: orgmod.Organization, address: str, card_ok: bool 
             miss.append("карточка заполнена не полностью")
         if not court_ok:
             miss.append("нет участка")
-    if kind == "claims" and claim_sent:
-        miss.append(f"претензия уже отправлена {claim_sent}")
+    if claim_sent and kind in ("claims", "court"):
+        miss.append(f"претензия уже отправлена {claim_sent}" if kind == "claims" else f"приказ уже подан в суд {claim_sent}")
     if org.houses:
         house = orgmod.find_house(org, address)
         if house is None:
