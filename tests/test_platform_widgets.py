@@ -178,3 +178,26 @@ def _walk(w):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SettingsTabsTest(unittest.TestCase):
+    def test_tabs_switch_pages_and_remember_choice(self):
+        old = (app.save_settings,)
+        app.save_settings = lambda s: None
+        try:
+            a = app.App()
+            sd = app.SettingsDialog(a)
+            sd.update()
+            self.assertTrue(sd.pages["Отбор"].winfo_ismapped())
+            sd.tabs.select(2)
+            sd.update()
+            self.assertTrue(sd.pages["Документы"].winfo_ismapped())
+            self.assertFalse(sd.pages["Отбор"].winfo_ismapped())
+            sd.destroy()
+            sd2 = app.SettingsDialog(a)
+            sd2.update()
+            self.assertTrue(sd2.pages["Документы"].winfo_ismapped())          # открывается на последней вкладке
+            sd2.destroy()
+            a.destroy()
+        finally:
+            app.save_settings, = old

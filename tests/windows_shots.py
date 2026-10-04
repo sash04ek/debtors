@@ -80,7 +80,10 @@ def main():
     a.orgs = [org] + a.orgs
     sd = app.SettingsDialog(a)
     settle(sd)
-    shot(sd, f"{mode_tag}-03-settings", dark)
+    for i, tab in enumerate(sd.tabs.labels):                       # каждая вкладка настроек отдельным снимком
+        sd.tabs.select(i)
+        settle(sd, 0.3)
+        shot(sd, f"{mode_tag}-03-settings-{i + 1}", dark)
     sd.destroy()
     od = app.OrgDialog(a, a.orgs, org.name, on_close=lambda n: None)
     settle(od)

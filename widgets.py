@@ -98,11 +98,10 @@ class _AquaSwitch(tk.Canvas):
             self.command()
 
     def _pill(self, x0, y0, x1, y1, color):
-        """«Таблетка»: два круга и прямоугольник между ними (штатные овалы Tk сглажены, многоугольники и толстые линии — нет)."""
+        """«Таблетка»: толстая линия со скруглёнными концами (один объект — без стыков между кругами и прямоугольником)."""
         h = y1 - y0
-        self.create_oval(x0, y0, x0 + h, y1, fill=color, outline="")
-        self.create_oval(x1 - h, y0, x1, y1, fill=color, outline="")
-        self.create_rectangle(x0 + h / 2, y0, x1 - h / 2, y1, fill=color, outline="")
+        cy = (y0 + y1) / 2
+        self.create_line(x0 + h / 2, cy, x1 - h / 2, cy, width=h, capstyle="round", fill=color)
 
     def redraw(self, pal: dict | None = None):
         self.pal = pal or self.pal
@@ -119,10 +118,10 @@ class _AquaSwitch(tk.Canvas):
         x = m + w - 2 - d if on else m + 2
         y = m + 2
         try:
-            shadow = mix(self, color, "#000000", 0.35)
+            shadow = mix(self, color, "#000000", 0.12)
         except tk.TclError:
             shadow = "#555555"
-        self.create_oval(x - 0.5, y + 0.5, x + d + 0.5, y + d + 1.5, fill=shadow, outline="")      # мягкая тень под кнопкой
+        self.create_oval(x, y + 0.5, x + d, y + d + 0.5, fill=shadow, outline="")                  # лёгкая тень под кнопкой
         self.create_oval(x, y, x + d, y + d, fill="#ffffff", outline="")
 
 
@@ -271,6 +270,46 @@ def section(parent: tk.Misc, title: str, pady: tuple = (14, 0)) -> Card:
     return card
 
 
+class Tabs(tk.Frame):
+    """Вкладки-заголовки: подписи в ряд, у выбранной — цветная черта снизу (цвета берутся у темы, поэтому одинаково на всех платформах).
+    command(i) вызывается при выборе вкладки."""
+
+    def __init__(self, parent: tk.Misc, titles: list[str], command, selected: int = 0):
+        super().__init__(parent, bd=0, highlightthickness=0)
+        self.role, self.command, self.selected = "tabs", command, selected
+        self.labels, self.marks = [], []
+        top = tk.Frame(self, bd=0)
+        top.pack(fill="x")
+        for i, title in enumerate(titles):
+            cell = tk.Frame(top, bd=0)
+            cell.pack(side="left", padx=(0, 18))
+            lbl = tk.Label(cell, text=title, bd=0, cursor="hand2", font=bold_font(parent), pady=6)
+            lbl.pack()
+            mark = tk.Frame(cell, height=2, bd=0)
+            mark.pack(fill="x")
+            lbl.bind("<Button-1>", lambda e, i=i: self.select(i))
+            self.labels.append(lbl)
+            self.marks.append(mark)
+        self.line = tk.Frame(self, height=1, bd=0)
+        self.line.pack(fill="x")
+        self.redraw(palette(self))
+
+    def select(self, i: int, notify: bool = True) -> None:
+        self.selected = i
+        self.redraw(palette(self))
+        if notify:
+            self.command(i)
+
+    def redraw(self, pal: dict) -> None:
+        self.configure(bg=pal["bg"])
+        for i, (lbl, mark) in enumerate(zip(self.labels, self.marks)):
+            on = i == self.selected
+            lbl.configure(bg=pal["bg"], fg=pal["fg"] if on else pal["muted"])
+            mark.configure(bg=pal["accent"] if on else pal["bg"])
+            lbl.master.configure(bg=pal["bg"])
+        self.line.configure(bg=pal["line"])
+
+
 class Badge(tk.Canvas):
     """Круглый значок с номером шага."""
 
@@ -331,7 +370,7 @@ def retheme(widget: tk.Misc) -> None:
                 w.configure(bg=pal["field" if role.startswith("field") else "bg"], fg=pal["fg"])
             elif role in ("field-muted", "window-muted"):
                 w.configure(bg=pal["field" if role.startswith("field") else "bg"], fg=pal["muted"])
-            elif role in ("switch", "select", "badge"):
+            elif role in ("switch", "select", "badge", "tabs"):
                 w.redraw(pal)
         except tk.TclError:
             pass

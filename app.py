@@ -2090,7 +2090,7 @@ OPTIONAL_COLUMNS = ("addr_col", "house_col", "flat_col")
 
 
 class SettingsDialog(Dialog):
-    """Экран настроек: колонки файла, число должников, правила отбора."""
+    """Экран настроек по вкладкам: отбор, колонки файла, документы (организации, госпошлина, участки), общие (вид, данные)."""
 
     def __init__(self, app: "App"):
         super().__init__(app)
@@ -2100,33 +2100,25 @@ class SettingsDialog(Dialog):
         if _is_mac(app):                                           # тема окна — до построения, чтобы цвета блоков считались верно
             set_window_appearance(app, self, app.settings.theme)
 
-        # прокручиваемая форма из блоков-карточек в стиле системных настроек
-        outer = ttk.Frame(self)
-        outer.pack(fill="both", expand=True, padx=(16, 0), pady=(0, 0))
-        narrow = app.winfo_screenwidth() < 1250                 # на узком экране блоки идут в один столбец
-        canvas = tk.Canvas(outer, highlightthickness=0, width=560 if narrow else 1060)
-        sb = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
-        body = ttk.Frame(canvas)
-        canvas.configure(yscrollcommand=sb.set)
-        canvas.pack(side="left", fill="both", expand=True)
-        make_autoscroll(canvas, body, sb)
-        canvas._wheel_scrollable = True
-        pad_r = ttk.Frame(body)                               # отступ справа от полосы прокрутки
-        pad_r.pack(fill="both", expand=True, padx=(0, 14))
-        body = pad_r
-        left = ttk.Frame(body)                                # блоки в два столбца: окно не вытягивается по вертикали
-        right = ttk.Frame(body)
-        left.grid(row=0, column=0, sticky="new", padx=(0, 0 if narrow else 8))
-        right.grid(row=1 if narrow else 0, column=0 if narrow else 1, sticky="new", padx=(0 if narrow else 8, 0))
-        body.columnconfigure(0, weight=1, uniform="cols")
-        if not narrow:
-            body.columnconfigure(1, weight=1, uniform="cols")
+        # вкладки; на каждой — блоки-карточки в стиле системных настроек
+        names = ["Отбор", "Колонки", "Документы", "Общие"]
+        pages = {n: ttk.Frame(self, padding=(16, 0, 16, 0)) for n in names}
+        self.pages = pages
 
-        cols = widgets.section(left, "Колонки файла", pady=(8, 0))
+        def show(i: int) -> None:
+            for n, page in pages.items():
+                page.pack_forget()
+            pages[names[i]].pack(fill="both", expand=True)
+            app._settings_tab = i
+        tabs = widgets.Tabs(self, names, show, selected=getattr(app, "_settings_tab", 0))
+        tabs.pack(fill="x", padx=16, pady=(12, 0))
+        self.tabs = tabs
+
+        cols = widgets.section(pages["Колонки"], "Колонки файла", pady=(8, 0))
         for key, text in COLUMN_FIELDS.items():
             widgets.PopupSelect(cols.row(text), app.col_vars[key], app.col_options[key] or [""]).pack()
 
-        rules = widgets.section(right, "Отбор", pady=(8, 0))
+        rules = widgets.section(pages["Отбор"], "Отбор", pady=(8, 0))
         ttk.Spinbox(rules.row("Показать должников"), from_=1, to=100000, textvariable=app.top_n, width=7).pack()
         widgets.Switch(rules.row("ИП считать физлицами"), app.ip_as_person).pack()
         widgets.Switch(rules.row("Пропускать нежилые помещения"), app.skip_nonres).pack()
@@ -2137,21 +2129,21 @@ class SettingsDialog(Dialog):
         widgets.PopupSelect(rules.row("Порядок"), app.sort_dir_var, [DESC_LABEL, ASC_LABEL]).pack()
         ttk.Button(rules.row("Признаки организаций"), text="Изменить…", command=app.edit_markers).pack()
 
-        look = widgets.section(left, "Внешний вид")
+        look = widgets.section(pages["Общие"], "Внешний вид", pady=(8, 0))
         widgets.PopupSelect(look.row("Тема"), app.theme_var, list(THEME_LABELS.values()), command=app.change_theme).pack()
         widgets.PopupSelect(look.row("Шрифт таблицы"), app.font_var, list(FONT_LABELS.values()),
                             command=app.change_table_font).pack()
         if native_date.available():
             widgets.Switch(look.row("Системный календарь"), app.native_date_var, command=app.save_settings_now).pack()
 
-        dty = widgets.section(left, "Госпошлина")
+        dty = widgets.section(pages["Документы"], "Госпошлина", pady=(8, 0))
         widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
         ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
 
-        orgs = widgets.section(left, "Организации")
+        orgs = widgets.section(pages["Документы"], "Организации")
         ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
 
-        cf = widgets.section(right, "Судебные участки")
+        cf = widgets.section(pages["Документы"], "Судебные участки")
         self.regions = tk.StringVar(value=courtsmod.load()["regions"])                  # код(ы) региона — именно он хранится
         reg_right = cf.row("Регионы")
         ttk.Button(reg_right, text="Выбрать…", command=self.choose_regions).pack(side="right")
@@ -2164,7 +2156,7 @@ class SettingsDialog(Dialog):
         self.courts_lbl.pack()
         ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
         ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
-        dbox = widgets.section(right, "Данные")
+        dbox = widgets.section(pages["Общие"], "Данные")
         ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
         ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
@@ -2172,15 +2164,20 @@ class SettingsDialog(Dialog):
         widgets.retheme(self)
 
         btns = ttk.Frame(self)
-        btns.pack(fill="x", padx=16, pady=12)
+        btns.pack(side="bottom", fill="x", padx=16, pady=12)
         ttk.Button(btns, text="Готово", command=self.close, default="active").pack(side="right")
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Return>", lambda e: self.close())
         self.bind("<Escape>", lambda e: self.close())
         self.update_idletasks()
-        h = min(canvas.bbox("all")[3] + 70, self.winfo_screenheight() - 140)
-        self.geometry(f"{min(600 if narrow else 1100, self.winfo_screenwidth() - 40)}x{h}")
-        self.resizable(False, True)
+        page_h = 0
+        for page in pages.values():                                  # высота по самой высокой вкладке: окно не прыгает при переключении
+            page_h = max(page_h, sum((c.body.winfo_reqheight() + 2 * c.PAD_Y if isinstance(c, widgets.Card) else c.winfo_reqheight()) + 8
+                                     for c in page.winfo_children()) + 12)
+        show(tabs.selected)
+        h = min(tabs.winfo_reqheight() + 12 + page_h + btns.winfo_reqheight() + 24, self.winfo_screenheight() - 140)
+        self.geometry(f"{min(600, self.winfo_screenwidth() - 40)}x{h}")
+        self.resizable(False, False)
         app.settings_dialog = self
         center_over(self, app)
 
