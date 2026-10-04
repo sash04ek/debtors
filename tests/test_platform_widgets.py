@@ -201,3 +201,27 @@ class SettingsTabsTest(unittest.TestCase):
             a.destroy()
         finally:
             app.save_settings, = old
+
+
+class OwnerDialogSwitchTest(unittest.TestCase):
+    def test_switch_is_not_inside_labelframe(self):
+        """У рамки LabelFrame на macOS свой оттенок фона: переключатель внутри неё окружён прямоугольником другого цвета."""
+        import orgs
+        old = app.save_settings
+        app.save_settings = lambda s: None
+        try:
+            a = app.App()
+            dlg = app.OwnerDialog(a, {"address": "Тестовая ул 1", "flat": "5", "report_fio": "Иванов Иван Иванович", "debt": 1000.0},
+                                  orgs.default_orgs()[0])
+
+            def walk(w, inside=False):
+                inside = inside or w.winfo_class() == "TLabelframe"
+                if type(w).__name__ == "_AquaSwitch":
+                    self.assertFalse(inside, "переключатель внутри LabelFrame")
+                for c in w.winfo_children():
+                    walk(c, inside)
+            walk(dlg)
+            dlg.destroy()
+            a.destroy()
+        finally:
+            app.save_settings = old
