@@ -105,10 +105,21 @@ class ClaimUiTests(unittest.TestCase):
         self.assertIsNotNone(a.claims_bar)                                    # есть просроченная претензия
         vals = a.tree.item(a.tree.get_children()[0], "values")
         self.assertEqual(len(vals), app.N_SERVICE + 4)
+        self.assertEqual(a.court_marks, [""] * 3)
         claimlog.close([("Тестовая ул 1", "2")])
         a.after_claims_changed()
         self.assertTrue(a.claim_marks[1].startswith("✓"))
         self.assertIsNone(a.claims_bar)
+
+    def test_court_column_and_unmark(self):
+        self.load()
+        a = self.app
+        a.check_state = [True, True, False]
+        claimlog.mark_court([("Тестовая ул 1", "1"), ("Тестовая ул 1", "2")], date(2026, 3, 1))
+        a.after_claims_changed()
+        self.assertEqual(a.court_marks, ["в суд 01.03.26", "в суд 01.03.26", ""])
+        a.change_claims("unmark_court")
+        self.assertEqual(a.court_marks, ["", "", ""])
 
     def test_change_claims_for_checked_rows(self):
         self.load()
@@ -117,3 +128,42 @@ class ClaimUiTests(unittest.TestCase):
         claimlog.mark_sent([("Тестовая ул 1", "1"), ("Тестовая ул 1", "2")], date.today())
         a.change_claims("unmark")
         self.assertEqual(a.claim_marks, ["", "✉ " + claimlog.short(date.today().isoformat()), ""])
+
+
+class CourtOrderLogTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.old = storage.CLAIMS_PATH
+        storage.CLAIMS_PATH = Path(self.tmp.name) / "claims.json"
+
+    def tearDown(self):
+        storage.CLAIMS_PATH = self.old
+        self.tmp.cleanup()
+
+    def test_court_mark_independent_of_claim(self):
+        claimlog.mark_court([("Х ул 1", "1")], date(2026, 3, 1), "Орг")
+        rec = claimlog.get("Х ул 1", "1")
+        self.assertEqual(claimlog.court_date(rec), date(2026, 3, 1))
+        self.assertEqual(claimlog.status(rec, 40), "")                          # претензии не было — колонка «Претензия» пуста
+
+    def test_claim_marks_do_not_erase_court_and_vice_versa(self):
+        claimlog.mark_sent([("Х ул 1", "1")], date(2026, 1, 1))
+        claimlog.mark_court([("Х ул 1", "1")], date(2026, 3, 1))
+        claimlog.mark_sent([("Х ул 1", "1")], date(2026, 1, 5))                 # повторная отметка претензии
+        self.assertEqual(claimlog.court_date(claimlog.get("Х ул 1", "1")), date(2026, 3, 1))
+        claimlog.unmark([("Х ул 1", "1")])
+        self.assertIsNotNone(claimlog.get("Х ул 1", "1"))                       # запись жива: есть подача в суд
+        claimlog.unmark_court([("Х ул 1", "1")])
+        self.assertIsNone(claimlog.get("Х ул 1", "1"))                          # пустая запись удалена
+
+    def test_court_filing_stops_overdue_reminder(self):
+        claimlog.mark_sent([("Х ул 1", "1")], date(2026, 1, 1))
+        self.assertEqual(len(claimlog.overdue(40, date(2026, 3, 1))), 1)
+        claimlog.mark_court([("Х ул 1", "1")], date(2026, 2, 20))
+        self.assertEqual(claimlog.overdue(40, date(2026, 3, 1)), [])
+        self.assertEqual(claimlog.status(claimlog.get("Х ул 1", "1"), 40, date(2026, 3, 1)), claimlog.SENT)
+
+    def test_precheck_for_court_kind(self):
+        import orgs
+        org = orgs.Organization(name="О")
+        self.assertEqual(precheck.row_issues("court", org, "Х ул 1", claim_sent="01.03.2026"), ["приказ уже подан в суд 01.03.2026"])
