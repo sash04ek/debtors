@@ -1,6 +1,15 @@
 name: Снимки на Windows
 on:
-  workflow_dispatch:                 # запускается вручную: снимки окон на Windows для проверки внешнего вида
+  workflow_dispatch:                 # вручную: снимки окон на Windows для проверки внешнего вида
+  pull_request:                      # и на каждый PR, который меняет код программы
+    paths:
+      - "*.py"
+      - "tests/windows_shots.py"
+      - "requirements.txt"
+      - ".github/workflows/windows-shots.yml"
+concurrency:
+  group: windows-shots-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   shots:
     runs-on: windows-latest
@@ -15,7 +24,12 @@ jobs:
       - run: python tests/windows_shots.py light
       - run: python tests/windows_shots.py dark
       - run: python tests/windows_shots.py light 2.0
+      - name: Итог
+        if: always()
+        shell: bash
+        run: echo "Снимки окон в светлой и тёмной теме — в артефакте **windows-shots** (внизу страницы запуска)." >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v7
+        if: always()
         with:
           name: windows-shots
           path: shots/*.png

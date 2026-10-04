@@ -75,6 +75,23 @@ class Card:
         return out
 
 
+REQUIRED_OWNER_FIELDS = ("birth_date", "birth_place", "passport", "reg_address")      # без них заявление остаётся с пропусками
+
+
+def card_status(card: Card | None, report_fio: str = "") -> str:
+    """Заполненность карточки: «none» — данных нет, «partial» — есть, но для заявления не хватает, «full» — достаточно."""
+    if card is None:
+        return "none"
+    if card.unknown:
+        return "full" if card.cadastral.strip() else ("partial" if card.owners else "none")
+    if not any(getattr(o, k).strip() for o in card.owners for k in OWNER_FIELDS):
+        return "none"
+    people = card.people(report_fio)
+    if people and all(getattr(o, k).strip() for o in people for k in REQUIRED_OWNER_FIELDS):
+        return "full"
+    return "partial"
+
+
 def make_key(address, flat) -> str:
     from orgs import norm_addr
     a = norm_addr(address)
