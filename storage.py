@@ -50,16 +50,17 @@ COURTS_PATH = DATA_DIR / "courts.json"
 OWNERS_PATH = DATA_DIR / "owners.json"
 STATE_PATH = DATA_DIR / "state.json"
 POA_DIR = DATA_DIR / "poa"                           # файлы доверенностей организаций (docx)
+CLAIMS_PATH = DATA_DIR / "claims.json"               # отметки об отправленных претензиях
 TRASH_PATH = DATA_DIR / "trash.json"                 # удалённые карточки собственников (хранятся 30 дней)
 
 # ---------- надёжная запись и версия схемы ----------
 # Версия схемы хранится в самом файле («schema_version»). Файлы без версии — прежние (версия 0): они читаются и при
 # следующем сохранении записываются в новом формате. Новую версию формата вводят так: увеличить номер здесь и добавить
 # функцию в MIGRATIONS — она переводит данные с версии N на N+1.
-SCHEMA_VERSION = {"settings": 1, "orgs": 2, "courts": 1, "owners": 1, "trash": 1, "state": 1}
+SCHEMA_VERSION = {"settings": 1, "orgs": 2, "courts": 1, "owners": 1, "trash": 1, "state": 1, "claims": 1}
 # Файлы, у которых данные — список или словарь «ключ -> запись»: версия лежит рядом, а данные — под этим ключом.
 # У остальных (словарь полей) версия — просто ещё одно поле.
-CONTAINER_KEY = {"orgs": "organizations", "owners": "cards", "trash": "items"}
+CONTAINER_KEY = {"orgs": "organizations", "owners": "cards", "trash": "items", "claims": "records"}
 MIGRATIONS: dict = {}                                 # (вид файла, версия N) -> функция(данные) -> данные версии N+1
 
 
@@ -130,7 +131,7 @@ def save_json(path, kind: str, payload, private: bool = False) -> None:
 
 
 # что переносится при экспорте/импорте (состояние окна state.json не переносим)
-TRANSFER_FILES = ("settings.json", "orgs.json", "courts.json", "owners.json", "trash.json")
+TRANSFER_FILES = ("settings.json", "orgs.json", "courts.json", "owners.json", "trash.json", "claims.json")
 
 
 def export_data(zip_path, directory: Path | None = None) -> list[str]:

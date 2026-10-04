@@ -9,9 +9,12 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 os.environ.setdefault("DEBTORS_HOME", tempfile.mkdtemp())
 
+from datetime import date, timedelta  # noqa: E402
+
 from PIL import ImageGrab, ImageStat  # noqa: E402
 
 import app  # noqa: E402
+import claimlog  # noqa: E402
 import core  # noqa: E402
 import orgs  # noqa: E402
 import owners  # noqa: E402
@@ -99,6 +102,8 @@ def main():
     owners.save_card(owners.Card(address="Тестовая ул 1", flat="1", owners=[owners.Owner(
         birth_date="01.01.1980", birth_place="г. Город", passport="0000 000000", reg_address="ул. Тестовая, 1")]))   # ✓
     owners.save_card(owners.Card(address="Тестовая ул 1", flat="2", owners=[owners.Owner(passport="0000 000000")]))   # ⚠
+    claimlog.mark_sent([("Тестовая ул 1", "1")], date.today() - timedelta(days=5))                    # ✉ ждём ответа
+    claimlog.mark_sent([("Тестовая ул 1", "2"), ("Тестовая ул 1", "3")], date.today() - timedelta(days=50))   # ⚠ срок истёк
     a.result = core.Result(headers, rows, [r[3] for r in rows], {})
     a.show_rows(headers, rows, numbered=True)
     settle(a)
