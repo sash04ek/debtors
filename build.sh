@@ -3,6 +3,12 @@
 # Нужен Python с Tk (python.org). Используем .venv проекта, если он есть.
 set -e
 cd "$(dirname "$0")"
+# Пересборка поверх запущенного приложения ломает его: оно подгружает модули из заменённого файла и падает с ошибками вроде
+# «Error -3 while decompressing data: incorrect header check». Поэтому сначала закройте приложение (или FORCE=1, если запущена не эта копия).
+if [ -z "$FORCE" ] && pgrep -f "dist/Должники.app/Contents/MacOS" >/dev/null 2>&1; then
+    echo "Приложение dist/Должники.app запущено: закройте его и повторите (или FORCE=1 ./build.sh)." >&2
+    exit 1
+fi
 PY=/Library/Frameworks/Python.framework/Versions/3.14/bin/python3
 [ -x "$PY" ] || PY=python3
 [ -d .venv ] || "$PY" -m venv .venv
