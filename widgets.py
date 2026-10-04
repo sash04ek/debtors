@@ -271,6 +271,46 @@ def section(parent: tk.Misc, title: str, pady: tuple = (14, 0)) -> Card:
     return card
 
 
+class Tabs(tk.Frame):
+    """Вкладки-заголовки: подписи в ряд, у выбранной — цветная черта снизу (цвета берутся у темы, поэтому одинаково на всех платформах).
+    command(i) вызывается при выборе вкладки."""
+
+    def __init__(self, parent: tk.Misc, titles: list[str], command, selected: int = 0):
+        super().__init__(parent, bd=0, highlightthickness=0)
+        self.role, self.command, self.selected = "tabs", command, selected
+        self.labels, self.marks = [], []
+        top = tk.Frame(self, bd=0)
+        top.pack(fill="x")
+        for i, title in enumerate(titles):
+            cell = tk.Frame(top, bd=0)
+            cell.pack(side="left", padx=(0, 18))
+            lbl = tk.Label(cell, text=title, bd=0, cursor="hand2", font=bold_font(parent), pady=6)
+            lbl.pack()
+            mark = tk.Frame(cell, height=2, bd=0)
+            mark.pack(fill="x")
+            lbl.bind("<Button-1>", lambda e, i=i: self.select(i))
+            self.labels.append(lbl)
+            self.marks.append(mark)
+        self.line = tk.Frame(self, height=1, bd=0)
+        self.line.pack(fill="x")
+        self.redraw(palette(self))
+
+    def select(self, i: int, notify: bool = True) -> None:
+        self.selected = i
+        self.redraw(palette(self))
+        if notify:
+            self.command(i)
+
+    def redraw(self, pal: dict) -> None:
+        self.configure(bg=pal["bg"])
+        for i, (lbl, mark) in enumerate(zip(self.labels, self.marks)):
+            on = i == self.selected
+            lbl.configure(bg=pal["bg"], fg=pal["fg"] if on else pal["muted"])
+            mark.configure(bg=pal["accent"] if on else pal["bg"])
+            lbl.master.configure(bg=pal["bg"])
+        self.line.configure(bg=pal["line"])
+
+
 class Badge(tk.Canvas):
     """Круглый значок с номером шага."""
 
@@ -331,7 +371,7 @@ def retheme(widget: tk.Misc) -> None:
                 w.configure(bg=pal["field" if role.startswith("field") else "bg"], fg=pal["fg"])
             elif role in ("field-muted", "window-muted"):
                 w.configure(bg=pal["field" if role.startswith("field") else "bg"], fg=pal["muted"])
-            elif role in ("switch", "select", "badge"):
+            elif role in ("switch", "select", "badge", "tabs"):
                 w.redraw(pal)
         except tk.TclError:
             pass
