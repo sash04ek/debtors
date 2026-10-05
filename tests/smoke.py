@@ -24,9 +24,12 @@ def main() -> None:
     org = a.current_org()
     sd = app.SettingsDialog(a)
     sd.update()
-    for dlg in (app.RegionsDialog(sd), app.DutyScaleDialog(sd)):
+    cd = app.CourtsDialog(a)
+    cd.update()
+    for dlg in (app.RegionsDialog(cd), app.DutyScaleDialog(sd)):
         dlg.update()
         dlg.destroy()
+    cd.destroy()
     sd.destroy()
     od = app.OrgDialog(a, a.orgs, org.name, on_close=lambda n: None)
     od.update()
