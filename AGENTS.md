@@ -5,7 +5,7 @@
 ## Среда и команды
 
 - Репозиторий `sash04ek/debtors`, основная ветка `main`. Локально: Python 3.14 + Tk 9, окружение `.venv` (`.venv/bin/python`). В CI: Python 3.12 + Tk 8.6 — код должен работать на обоих (например, события Tk 9 вроде `<TouchpadScroll>` на Tk 8.6 недопустимы без `try/except TclError`).
-- Тесты: `.venv/bin/python -m unittest discover tests` (около 150, 2 пропущены — это опциональные e2e с `DEBTORS_NATIVE_E2E=1`). Запускать до каждого коммита. Статика: `.venv/bin/python -m pyflakes <файлы>`.
+- Тесты: `.venv/bin/python -m unittest discover tests` (около 150, 2 пропущены — это опциональные e2e с `DEBTORS_NATIVE_E2E=1`). Запускать до каждого коммита. Статика: `.venv/bin/python -m pyflakes <файлы>`. Перед пушем также `.venv/bin/python tests/smoke.py` — это проверка запуска из CI, `unittest discover` её не запускает; при смене конструкторов диалогов править и её.
 - Сборка macOS: `./build.sh` → `dist/Должники.app`. **Не пересобирать, пока приложение запущено** (`build.sh` в этом случае останавливается): запущенная копия подгружает модули из заменённого файла и падает с «Error -3 while decompressing data: incorrect header check». Если приложение открыто у пользователя, попросить закрыть его или не пересобирать локально; `FORCE=1` — только когда запущена другая копия. Windows и релизные артефакты собирает CI (PyInstaller, workflow «Сборка» на push и тег).
 - Версия берётся из тега (`version.py` подставляется при сборке; в репозитории остаётся значение по умолчанию).
 
