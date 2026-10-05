@@ -42,7 +42,7 @@ class PlatformWidgetsTest(unittest.TestCase):
             bar = a.nametowidget(a["menu"])
             labels = [bar.entrycget(i, "label") for i in range(bar.index("end") + 1)
                       if bar.type(i) == "cascade" and bar.entrycget(i, "label")]
-            self.assertEqual(labels, ["Файл", "Правка"])
+            self.assertEqual(labels, ["Файл", "Правка", "Справочники"])
             idx = next(i for i in range(bar.index("end") + 1) if bar.type(i) == "cascade" and bar.entrycget(i, "label") == "Файл")
             apple = bar.nametowidget(bar.entrycget(0, "menu"))
             self.assertEqual(apple.entrycget(0, "label"), "О программе «Должники»")      # стандартный пункт About в меню приложения
@@ -76,7 +76,7 @@ class PlatformWidgetsTest(unittest.TestCase):
         try:
             self.assertEqual(str(a["menu"]), "")                              # системной строки меню нет — она всегда светлая
             self.assertEqual([b.cget("text") for b in a.menubar_frame.winfo_children() if isinstance(b, ttk.Button)],
-                             ["Файл", "Правка", "Справка"])                    # на Windows свои «Файл», «Правка», «Справка»
+                             ["Файл", "Правка", "Справочники", "Справка"])      # на Windows своя строка меню
             self.assertEqual(a.menus["Файл"].entrycget(0, "label"), "Открыть Excel…")
             self.assertIsInstance(a.sheet_cb, ttk.Combobox)
             self.assertIsInstance(a.org_cb, ttk.Combobox)
@@ -87,9 +87,12 @@ class PlatformWidgetsTest(unittest.TestCase):
             self.assertIn("Checkbutton", kinds)
             self.assertNotIn("_AquaSwitch", kinds)
             self.assertNotIn("_AquaPopupSelect", kinds)
-            for dlg in (app.RegionsDialog(sd), app.DutyScaleDialog(sd)):
+            cd = app.CourtsDialog(a)                                  # справочник участков — отдельное окно, не вкладка настроек
+            cd.update()
+            for dlg in (app.RegionsDialog(cd), app.DutyScaleDialog(sd)):
                 dlg.update()
                 dlg.destroy()
+            cd.destroy()
             sd.destroy()
             a.settings.theme = "dark"                                  # тёмная палитра поверх clam
             app.apply_theme(a, "dark")
@@ -222,6 +225,30 @@ class OwnerDialogSwitchTest(unittest.TestCase):
                     walk(c, inside)
             walk(dlg)
             dlg.destroy()
+            a.destroy()
+        finally:
+            app.save_settings = old
+
+
+class ReferencesMenuTest(unittest.TestCase):
+    def test_references_menu_and_settings_no_longer_hold_them(self):
+        old = app.save_settings
+        app.save_settings = lambda s: None
+        try:
+            a = app.App()
+            refs = a.menus["Справочники"]
+            self.assertEqual([refs.entrycget(i, "label") for i in range(3 - 1)], ["Организации…", "Судебные участки…"])
+            sd = app.SettingsDialog(a)
+            sd.update()
+            texts = {w.cget("text") for w in _walk(sd) if "text" in w.keys()}
+            self.assertNotIn("Список организаций", texts)                     # переехало в «Справочники»
+            self.assertNotIn("Судьи и адреса участков", texts)
+            sd.destroy()
+            a.open_courts()
+            first = a._courts_win
+            a.open_courts()
+            self.assertIs(a._courts_win, first)                               # второй вызов поднимает то же окно
+            first.destroy()
             a.destroy()
         finally:
             app.save_settings = old
