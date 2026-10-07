@@ -88,6 +88,10 @@ def main():
         settle(sd, 0.3)
         shot(sd, f"{mode_tag}-03-settings-{i + 1}", dark)
     sd.destroy()
+    cd = app.CourtsDialog(a)                                       # справочник «Судебные участки»
+    settle(cd)
+    shot(cd, f"{mode_tag}-03b-courts", dark)
+    cd.destroy()
     od = app.OrgDialog(a, a.orgs, org.name, on_close=lambda n: None)
     settle(od)
     shot(od, f"{mode_tag}-04-orgs-houses", dark)
@@ -117,6 +121,12 @@ def main():
     x, y, w = a.winfo_rootx(), a.winfo_rooty(), a.winfo_width()
     ImageGrab.grab(bbox=(max(0, x - 8), max(0, y - 40), x + w + 8, y + 330), all_screens=True).save(OUT / f"{mode_tag}-07-menu-file.png")
     menu.unpost()
+    refs = a.menus["Справочники"]
+    rbtn = [b for b in a.menubar_frame.winfo_children()][2]
+    refs.tk_popup(rbtn.winfo_rootx(), rbtn.winfo_rooty() + rbtn.winfo_height())
+    settle(a, 0.5)
+    ImageGrab.grab(bbox=(max(0, x - 8), max(0, y - 40), x + w + 8, y + 330), all_screens=True).save(OUT / f"{mode_tag}-08-menu-refs.png")
+    refs.unpost()
     a.destroy()
     if PROBLEMS:
         print("\n".join(PROBLEMS))

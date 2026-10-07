@@ -1207,8 +1207,13 @@ class App(tk.Tk):
         edit.add_separator()
         edit.add_command(label="Выделить всё", accelerator=f"{key}A", command=lambda: self._edit_event("<<SelectAll>>"))
         self.menus["Правка"] = edit
+        refs = new_menu(self if not mac else bar)                # справочники — данные, а не настройки
+        refs.add_command(label="Организации…", command=self.edit_orgs)
+        refs.add_command(label="Судебные участки…", command=self.open_courts)
+        self.menus["Справочники"] = refs
         if mac:
             bar.add_cascade(label="Правка", menu=edit)
+            bar.add_cascade(label="Справочники", menu=refs)
             self.configure(menu=bar)                            # на macOS — системная строка меню
         else:
             help_menu = new_menu(self)
@@ -1403,14 +1408,14 @@ class App(tk.Tk):
                     self.result = None
                     self.run()
                 return
-            msg += ("\n\nПроверьте выбранную организацию и её дома (Настройки → Организации → Дома; "
+            msg += ("\n\nПроверьте выбранную организацию и её дома (Справочники → Организации → Дома; "
                     "пустой список домов означает «все дома файла»).")
             messagebox.showinfo("Пустой список", msg)
             return
         if st.get("дома не в управлении", 0) and st["дома не в управлении"] >= total - st.get("дома других организаций", 0) > 0:
             messagebox.showinfo("Пустой список", f"Включён отбор «Только дома в управлении», а все дома организации «{org.name}» из этого "
                                 "отчёта сейчас не в управлении: у них не указана дата «В управлении с» или дом уже выбыл "
-                                f"(строк отброшено: {st['дома не в управлении']}).\n\nУкажите даты в Настройки → Организации → Дома "
+                                f"(строк отброшено: {st['дома не в управлении']}).\n\nУкажите даты в Справочники → Организации → Дома "
                                 "или выключите отбор в настройках.")
             return
         parts = [f"{k}: {st[k]}" for k in ("дома не в управлении", "не физлица", "нежилые помещения", "без долга / сумма не распознана") if st.get(k)]
@@ -1434,6 +1439,13 @@ class App(tk.Tk):
             self._settings_win.lift()
             return
         self._settings_win = SettingsDialog(self)
+
+    def open_courts(self):
+        dlg = getattr(self, "_courts_win", None)
+        if dlg is not None and dlg.winfo_exists():
+            dlg.lift()
+            return
+        self._courts_win = CourtsDialog(self)
 
     def edit_orgs(self):
         OrgDialog(self, self.orgs, self.org_cb.get(), on_close=lambda name: self.refresh_orgs(name))
@@ -1616,7 +1628,7 @@ class App(tk.Tk):
             messagebox.showinfo("Нет колонок", "Для документов выберите колонки «Адрес дома» и «Квартира» в настройках.")
             return
         if kind == "letter" and not org.letter_header.strip():
-            messagebox.showinfo("Нет шапки", "Заполните вкладку «Письмо в ЕИРЦ» в настройках → «Организации…».")
+            messagebox.showinfo("Нет шапки", "Заполните вкладку «Письмо в ЕИРЦ» в меню «Справочники» → «Организации…».")
             return
         pick = self.checked_indexes()
         if not pick:
@@ -1699,7 +1711,7 @@ class App(tk.Tk):
                 courtsmod.save_last(batch_code)
         elif not courts_list:
             messagebox.showinfo("Судебные участки", "Список участков не загружен: в заявлениях поле суда останется пустым. "
-                                "Загрузить список можно в настройках (шестерёнка → «Судебные участки»).")
+                                "Загрузить список можно в меню «Справочники» → «Судебные участки».")
         total = sum(len(j["cases"]) for j in jobs)
         n_known = n_unknown = no_card = no_court = multi = done = n_duty = 0
         prog = self.start_progress("Заявления о судебном приказе", total)
@@ -1748,7 +1760,7 @@ class App(tk.Tk):
             note += f"\n\nБез судебного участка (поле суда пустое): {no_court}."
         if n_duty:
             note += (f"\n\nГоспошлина рассчитана по ст. 333.19 НК РФ (50 % от пошлины по иску) в заявлениях: {n_duty}. "
-                     "Проверьте ставки в Настройки → Госпошлина → «Таблица ставок…».")
+                     "Проверьте ставки в Настройки → Документы → Госпошлина → «Таблица ставок…».")
         if prog.cancelled:
             note += "\n\nСоздание прервано пользователем."
         poa = orgmod.copy_poa(org, "court", out) if n_known + n_unknown else None
@@ -2256,7 +2268,7 @@ class App(tk.Tk):
 _OPEN_KEY = "⌘O" if sys.platform == "darwin" else "Ctrl+O"
 NEXT_STEPS = (
     ("Откройте файл отчёта", f"Кнопка «Открыть Excel…» ({_OPEN_KEY}) или перетащите файл на значок программы."),
-    ("Проверьте организацию и колонки", "Шестерёнка → «Настройки» и «Организации» (дома, шапки, участки)."),
+    ("Проверьте организацию и колонки", "Меню «Справочники» → «Организации» (дома, шапки, участки), шестерёнка → «Настройки» (колонки файла)."),
     ("Нажмите «Фильтровать»", "Останутся физлица с наибольшим долгом."),
     ("Заполните данные собственников", "Двойной клик по строке. В колонке «Данные»: ✓ карточка заполнена, ⚠ не хватает данных для заявления, ✗ карточки нет; в «Участок» ✗ — участок не задан."),
     ("Создайте документы", "Претензии, письмо в ЕИРЦ и заявления о судебном приказе."),
@@ -2326,22 +2338,6 @@ class SettingsDialog(Dialog):
         widgets.Switch(dty.row("Рассчитывать по НК РФ"), app.duty_auto).pack()
         ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
 
-        orgs = widgets.section(pages["Документы"], "Организации")
-        ttk.Button(orgs.row("Список организаций"), text="Открыть…", command=app.edit_orgs).pack()
-
-        cf = widgets.section(pages["Документы"], "Судебные участки")
-        self.regions = tk.StringVar(value=courtsmod.load()["regions"])                  # код(ы) региона — именно он хранится
-        reg_right = cf.row("Регионы")
-        ttk.Button(reg_right, text="Выбрать…", command=self.choose_regions).pack(side="right")
-        self.region_lbl = tk.Label(reg_right, text=courtsmod.regions_summary(self.regions.get()), bd=0)
-        self.region_lbl.role = "label"
-        self.region_lbl.pack(side="right", padx=(0, 8))
-        loaded = cf.row("Загружено")
-        self.courts_lbl = tk.Label(loaded, text="", bd=0)
-        self.courts_lbl.role = "muted"
-        self.courts_lbl.pack()
-        ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
-        ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
         cl = widgets.section(pages["Документы"], "Претензии")
         ttk.Spinbox(cl.row("Срок ответа, дней"), from_=1, to=365, textvariable=app.claim_days_var, width=5,
                     command=app.after_claims_changed).pack()
@@ -2353,7 +2349,6 @@ class SettingsDialog(Dialog):
         ttk.Button(dbox.row("Экспорт данных"), text="Экспорт…", command=self.export_data).pack()
         ttk.Button(dbox.row("Импорт данных"), text="Импорт…", command=self.import_data).pack()
 
-        self.show_courts_info()
         widgets.retheme(self)
 
         btns = ttk.Frame(self)
@@ -2414,6 +2409,53 @@ class SettingsDialog(Dialog):
                             parent=self)
         self.app.destroy()                                        # без сохранения: иначе старые настройки затрут загруженные
 
+    def close(self):
+        save_settings(self.app.collect_settings())
+        self.destroy()
+
+
+class CourtsDialog(Dialog):
+    """Справочник «Судебные участки»: регионы, загрузка списка участков с sudrf.ru, правка судей и адресов."""
+
+    def __init__(self, app: "App"):
+        super().__init__(app)
+        self.app = app
+        self.title("Судебные участки")
+        self.transient(app)
+        if _is_mac(app):
+            set_window_appearance(app, self, app.settings.theme)
+        body = ttk.Frame(self, padding=(16, 4, 16, 0))
+        body.pack(fill="both", expand=True)
+        ttk.Label(body, text="Список участков мировых судей нужен для поля суда в заявлениях о судебном приказе. "
+                             "Загружается публичный список с sudrf.ru (ваши данные не передаются).",
+                  style="Muted.TLabel", wraplength=520, justify="left").pack(anchor="w", pady=(10, 4))
+        cf = widgets.section(body, "Участки", pady=(8, 0))
+        self.regions = tk.StringVar(value=courtsmod.load()["regions"])                  # код(ы) региона — именно он хранится
+        reg_right = cf.row("Регионы")
+        ttk.Button(reg_right, text="Выбрать…", command=self.choose_regions).pack(side="right")
+        self.region_lbl = tk.Label(reg_right, text=courtsmod.regions_summary(self.regions.get()), bd=0)
+        self.region_lbl.role = "label"
+        self.region_lbl.pack(side="right", padx=(0, 8))
+        loaded = cf.row("Загружено")
+        self.courts_lbl = tk.Label(loaded, text="", bd=0)
+        self.courts_lbl.role = "muted"
+        self.courts_lbl.pack()
+        ttk.Button(cf.row("Список с sudrf.ru"), text="Загрузить", command=self.load_courts).pack()
+        ttk.Button(cf.row("Судьи и адреса участков"), text="Изменить…", command=self.edit_courts).pack()
+        self.show_courts_info()
+        widgets.retheme(self)
+        btns = ttk.Frame(self)
+        btns.pack(side="bottom", fill="x", padx=16, pady=12)
+        ttk.Button(btns, text="Готово", command=self.destroy, default="active").pack(side="right")
+        self.bind("<Return>", lambda e: self.destroy())
+        self.bind("<Escape>", lambda e: self.destroy())
+        self.update_idletasks()
+        content = sum((c.body.winfo_reqheight() + 2 * c.PAD_Y if isinstance(c, widgets.Card) else c.winfo_reqheight()) + 8
+                      for c in body.winfo_children())                      # высота карточек Canvas подтягивается позже, берём высоту их содержимого
+        self.geometry(f"{min(580, self.winfo_screenwidth() - 40)}x{min(content + btns.winfo_reqheight() + 70, self.winfo_screenheight() - 140)}")
+        self.resizable(False, False)
+        center_over(self, app)
+
     def show_courts_info(self):
         d = courtsmod.load()
         self.courts_lbl.config(text=(f"Загружено участков: {len(d['courts'])} (обновлено {d['updated']})"
@@ -2421,7 +2463,7 @@ class SettingsDialog(Dialog):
 
     def edit_courts(self):
         if not courtsmod.load()["courts"]:
-            messagebox.showinfo("Судебные участки", "Сначала загрузите список участков кнопкой слева.", parent=self)
+            messagebox.showinfo("Судебные участки", "Сначала загрузите список участков кнопкой «Загрузить».", parent=self)
             return
         CourtsEditorDialog(self)
 
@@ -2452,10 +2494,6 @@ class SettingsDialog(Dialog):
         note = ("\n\nВ списке sudrf.ru нет участков для: " + "; ".join(missing) + ". Для них участки нужно будет добавить другим способом.") \
             if missing else ""
         messagebox.showinfo("Судебные участки", f"Загружено участков: {len(courts_list)}.{note}", parent=self)
-
-    def close(self):
-        save_settings(self.app.collect_settings())
-        self.destroy()
 
 
 class AutoCombo(ttk.Frame):
@@ -3689,7 +3727,7 @@ class HousesEditor(ttk.Frame):
         self.combo.pack(side="left", fill="x", expand=True, padx=6)
         ttk.Button(crow, text="Назначить выбранным домам", command=self.assign).pack(side="left")
         if not self.courts:
-            ttk.Label(self, text="Список участков не загружен: настройки (шестерёнка) → «Судебные участки» → «Загрузить список».",
+            ttk.Label(self, text="Список участков не загружен: меню «Справочники» → «Судебные участки» → «Загрузить».",
                       style="Warn.TLabel").pack(anchor="w", pady=(4, 0))
 
     # --- участки ---
