@@ -111,8 +111,18 @@ def main():
     claimlog.mark_court([("Тестовая ул 1", "3"), ("Тестовая ул 1", "4")], date.today() - timedelta(days=3))   # «в суд дд.мм.гг»
     a.result = core.Result(headers, rows, [r[3] for r in rows], {})
     a.show_rows(headers, rows, numbered=True)
+    a.check_claim_reminders()                                      # плашка «Истёк срок ответа» (есть просроченные отметки выше)
+    a.show_update_bar({"tag": "9.9.9", "url": "https://example.com"})   # плашка об обновлении
     settle(a)
     shot(a, f"{mode_tag}-06-main-result", dark)
+    for name, make in (("06b-claims-due", lambda: app.ClaimsDueDialog(a)),
+                       ("06c-claim-sent", lambda: app.ClaimSentDialog(a, 3, 40)),
+                       ("06d-court-sent", lambda: app.ClaimSentDialog(a, 3, 0, court=True))):
+        dlg = make()
+        settle(dlg)
+        shot(dlg, f"{mode_tag}-{name}", dark)
+        dlg.destroy()
+    a.hide_update_bar()
     # открытое меню «Файл»: рисуется самим Tk, поэтому снимок делаем обычным способом
     menu = a.menus["Файл"]
     btn = [b for b in a.menubar_frame.winfo_children()][0]

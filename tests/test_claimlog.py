@@ -1,3 +1,5 @@
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import tempfile
 import tkinter as tk
 import unittest
@@ -68,7 +70,12 @@ class ClaimLogTests(unittest.TestCase):
 class ClaimUiTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
-        self.old = (storage.CLAIMS_PATH, app.save_settings, app.messagebox.showinfo)
+        saved = (storage.CLAIMS_PATH, app.save_settings, app.messagebox.showinfo)
+
+        def restore():
+            storage.CLAIMS_PATH, app.save_settings, app.messagebox.showinfo = saved
+        self.addCleanup(self.tmp.cleanup)
+        self.addCleanup(restore)                                           # до подмен: сработает и при skipTest
         storage.CLAIMS_PATH = Path(self.tmp.name) / "claims.json"
         app.save_settings = lambda s: None
         app.messagebox.showinfo = lambda *a, **kw: None
@@ -76,11 +83,7 @@ class ClaimUiTests(unittest.TestCase):
             self.app = app.App()
         except tk.TclError:
             self.skipTest("нет дисплея")
-
-    def tearDown(self):
-        self.app.destroy()
-        storage.CLAIMS_PATH, app.save_settings, app.messagebox.showinfo = self.old
-        self.tmp.cleanup()
+        self.addCleanup(self.app.destroy)
 
     def load(self, n=3):
         a, s = self.app, self.app.settings

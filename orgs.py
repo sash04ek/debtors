@@ -250,6 +250,15 @@ def house_addresses(org: Organization) -> set[str]:
     return {norm_addr(h["address"]) for h in org.houses}
 
 
+def court_map(org: Organization) -> dict[str, str]:
+    """{нормализованный адрес дома: код участка}; при повторе адреса берётся первая запись, как в house_court.
+    Для таблицы из тысяч строк: один проход по домам вместо прохода на каждую строку."""
+    out: dict[str, str] = {}
+    for h in org.houses:
+        out.setdefault(norm_addr(h["address"]), h.get("court", ""))
+    return out
+
+
 def house_court(org: Organization, address: str) -> str:
     """Код судебного участка, закреплённого за домом в списке домов организации (пусто, если не задан)."""
     a = norm_addr(address)

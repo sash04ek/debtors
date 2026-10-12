@@ -173,7 +173,7 @@ def import_data(zip_path, directory: Path | None = None) -> list[str]:
             (d / "poa" / name).write_bytes(raw)
     for name, raw in found.items():
         (d / name).write_bytes(raw)
-        if name in ("owners.json", "trash.json"):
+        if name in ("owners.json", "trash.json", "claims.json"):
             try:
                 os.chmod(d / name, 0o600)
             except OSError:

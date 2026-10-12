@@ -4,8 +4,8 @@
 set -e
 cd "$(dirname "$0")"
 # Пересборка поверх запущенного приложения ломает его: оно подгружает модули из заменённого файла и падает с ошибками вроде
-# «Error -3 while decompressing data: incorrect header check». Поэтому сначала закройте приложение (или FORCE=1, если запущена не эта копия).
-if [ -z "$FORCE" ] && pgrep -f "dist/Должники.app/Contents/MacOS" >/dev/null 2>&1; then
+# «Error -3 while decompressing data: incorrect header check». Поэтому сначала закройте приложение (FORCE=1 пропускает проверку; другие копии приложения, например из /Applications, пересборка не затрагивает).
+if [ "${FORCE:-0}" != "1" ] && pgrep -f "$PWD/dist/Должники.app/Contents/MacOS" >/dev/null 2>&1; then
     echo "Приложение dist/Должники.app запущено: закройте его и повторите (или FORCE=1 ./build.sh)." >&2
     exit 1
 fi

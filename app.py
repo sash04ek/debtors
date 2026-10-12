@@ -20,6 +20,7 @@ import core
 import court
 import datepicker
 import native_date
+import numwords
 import duty
 import courts as courtsmod
 import orgs as orgmod
@@ -659,6 +660,7 @@ class App(tk.Tk):
         self.restore_var = tk.BooleanVar(value=self.settings.restore_state)
         self.update_var = tk.BooleanVar(value=self.settings.update_check)
         self.claim_days_var = tk.StringVar(value=str(self.settings.claim_reply_days))
+        self.claim_days_var.trace_add("write", lambda *a: self._claims_changed_later())      # и стрелки, и набор с клавиатуры
         self.auto_filter_var = tk.BooleanVar(value=self.settings.auto_filter)
         self.native_date_var = tk.BooleanVar(value=self.settings.native_datepicker)
         datepicker.USE_NATIVE = self.settings.native_datepicker
@@ -759,6 +761,7 @@ class App(tk.Tk):
         self.claim_state: list[str] = []
         self.court_marks: list[str] = []
         self.court_dates: list[date | None] = []
+        self.claim_keys: list[int | None] = []
         self.court_flags: list[bool] = []
         self.card_full: list[bool] = []
         self.card_marks: list[str] = []
@@ -1139,7 +1142,8 @@ class App(tk.Tk):
             self.save_state()
 
     def destroy(self):
-        for job in [getattr(self, "_search_job", None), *getattr(self, "_update_jobs", [])]:
+        for job in [getattr(self, "_search_job", None), getattr(self, "_update_job", None), getattr(self, "_claims_job", None),
+                    *getattr(self, "_update_jobs", [])]:
             if job:
                 try:
                     self.after_cancel(job)                           # отложенные вызовы не должны сработать в закрытом окне
@@ -1264,14 +1268,24 @@ class App(tk.Tk):
         if not manual and (not self.update_var.get() or self.settings.update_checked == today
                            or updates.parse_version(self.app_version()) is None):
             return
+        if getattr(self, "_update_busy", False):                  # проверка уже идёт: не плодим потоки и окна с ответом
+            return
+        self._update_busy = True
         box: list = []
-        threading.Thread(target=lambda: box.append(updates.check(self.app_version())), daemon=True).start()
+
+        def work():
+            try:
+                box.append(updates.check(self.app_version()))
+            except Exception:                                     # любой сбой потока — «не удалось», а не вечный опрос
+                box.append(("error", None))
+        threading.Thread(target=work, daemon=True).start()
         self._poll_update(box, manual, today)
 
     def _poll_update(self, box: list, manual: bool, today: str) -> None:
         if not box:
-            self._update_jobs.append(self.after(200, lambda: self._poll_update(box, manual, today)))
+            self._update_job = self.after(200, lambda: self._poll_update(box, manual, today))
             return
+        self._update_busy = False
         status, info = box[0]
         if status in ("newer", "current"):
             self.settings.update_checked = today
@@ -1447,8 +1461,15 @@ class App(tk.Tk):
             return
         self._courts_win = CourtsDialog(self)
 
-    def edit_orgs(self):
-        OrgDialog(self, self.orgs, self.org_cb.get(), on_close=lambda name: self.refresh_orgs(name))
+    def edit_orgs(self, selected: str | None = None, focus_address: str = ""):
+        """Редактор организаций — одно окно: два окна работали бы с разными копиями, и последнее сохранение стёрло бы правки первого."""
+        dlg = getattr(self, "_orgs_win", None)
+        if dlg is not None and dlg.winfo_exists():
+            dlg.lift()
+            return dlg
+        self._orgs_win = OrgDialog(self, self.orgs, selected or self.org_cb.get(), on_close=lambda name: self.refresh_orgs(name),
+                                   focus_address=focus_address)
+        return self._orgs_win
 
     # ---------- создание документов ----------
     DOC_KINDS = {
@@ -1468,10 +1489,10 @@ class App(tk.Tk):
 
     def court_jobs(self, pick: list[int]) -> list[dict]:
         """По каждому отмеченному адресу: карточка и список дел (по одному на каждого собственника)."""
-        jobs = []
+        jobs, cards = [], owners._load_all()                      # owners.json разбирается один раз, а не на каждую строку
         for k in pick:
             info = self.row_info(k)
-            card = owners.get_card(info["address"], info["flat"]) or owners.get_or_new(info["address"], info["flat"])
+            card = owners.get_or_new(info["address"], info["flat"], cards)
             jobs.append({"k": k, "info": info, "card": card,
                          "cases": court.plan_cases(card, info["report_fio"], info["debt"])})
         return jobs
@@ -1506,9 +1527,16 @@ class App(tk.Tk):
     # ---------- отправленные претензии и срок ответа ----------
     def claim_days(self) -> int:
         try:
-            return max(1, int(self.claim_days_var.get()))
-        except (ValueError, tk.TclError):
+            return claimlog.clamp_days(self.claim_days_var.get())
+        except tk.TclError:
             return claimlog.DEFAULT_DAYS
+
+    def _claims_changed_later(self) -> None:
+        """Срок ответа изменён (стрелками или набран с клавиатуры): метки пересчитываются после паузы, а не на каждый символ."""
+        job = getattr(self, "_claims_job", None)
+        if job:
+            self.after_cancel(job)
+        self._claims_job = self.after(400, self.after_claims_changed)
 
     def picked_addresses(self) -> list[tuple[str, str]]:
         pick = self.checked_indexes()
@@ -1560,12 +1588,13 @@ class App(tk.Tk):
 
     def after_claims_changed(self) -> None:
         """Журнал изменился: обновляем колонку «Претензия» и плашку-напоминание."""
-        self.refresh_card_flags()
-        self.check_claim_reminders()
+        claims = claimlog._load()                                 # журнал читается один раз на оба обновления
+        self.refresh_claim_marks(claims)
+        self.check_claim_reminders(claims)
 
-    def check_claim_reminders(self) -> None:
+    def check_claim_reminders(self, claims: dict | None = None) -> None:
         """Плашка над панелью инструментов, если у каких-то претензий истёк срок ответа."""
-        due = claimlog.overdue(self.claim_days())
+        due = claimlog.overdue(self.claim_days(), data=claims)
         bar = getattr(self, "claims_bar", None)
         if bar is not None:
             bar.destroy()
@@ -1573,7 +1602,7 @@ class App(tk.Tk):
         if not due:
             return
         bar = self.claims_bar = ttk.Frame(self)
-        ttk.Label(bar, text=f"Истёк срок ответа на претензии: {len(due)} {'адрес' if len(due) % 10 == 1 and len(due) % 100 != 11 else 'адресов' if len(due) % 10 in (0, 5, 6, 7, 8, 9) or 11 <= len(due) % 100 <= 14 else 'адреса'}.",
+        ttk.Label(bar, text=f"Истёк срок ответа на претензии: {len(due)} {numwords.plural(len(due), ('адрес', 'адреса', 'адресов'))}.",
                   style="Warn.TLabel").pack(side="left", padx=(8, 8))
         ttk.Button(bar, text="Показать", command=self.show_claims_due).pack(side="left")
         ttk.Button(bar, text="✕", width=2, command=lambda: (bar.destroy(), setattr(self, "claims_bar", None))).pack(side="right", padx=6)
@@ -1595,10 +1624,10 @@ class App(tk.Tk):
             if miss:
                 rows.append((info["address"], info["flat"], ", ".join(miss)))
                 for m in miss:
-                    key = m.split(" (")[0]
+                    key = re.sub(r"\s\d{2}\.\d{2}\.\d{4}$", "", m.split(" (")[0])      # дата или период — не часть вида замечания
                     counts[key] = counts.get(key, 0) + 1
-        parts = [f"{what}: {n} из {len(pick)}" for what, n in counts.items()]
-        return ("; ".join(parts).capitalize() if parts else ""), rows
+        text = "; ".join(f"{what}: {n} из {len(pick)}" for what, n in counts.items())
+        return (text[:1].upper() + text[1:] if text else ""), rows
 
     def start_progress(self, title: str, total: int):
         return ProgressWindow(self, title, total) if total >= 3 else NoProgress()
@@ -1937,10 +1966,7 @@ class App(tk.Tk):
         s.duty_auto = self.duty_auto.get()
         s.restore_state = self.restore_var.get()
         s.update_check = self.update_var.get()
-        try:
-            s.claim_reply_days = max(1, int(self.claim_days_var.get()))
-        except ValueError:
-            s.claim_reply_days = claimlog.DEFAULT_DAYS
+        s.claim_reply_days = claimlog.clamp_days(self.claim_days_var.get())
         s.auto_filter = self.auto_filter_var.get()
         s.native_datepicker = self.native_date_var.get()
         datepicker.USE_NATIVE = s.native_datepicker
@@ -2152,6 +2178,8 @@ class App(tk.Tk):
             widgets.retheme(dlg)                                  # карточки настроек перекрашиваются в новую тему
 
     def save_settings_now(self):
+        if getattr(self, "_settings_frozen", False):              # данные только что импортированы: старые настройки их затрут
+            return
         try:
             save_settings(self.collect_settings())
         except Exception:
@@ -2193,15 +2221,32 @@ class App(tk.Tk):
         self.card_flags = [False] * n
         self.card_full = [False] * n
         self.card_marks = ["✗"] * n                       # ✓ карточка полная, ⚠ неполная, ✗ карточки нет
-        self.claim_marks = [""] * n                       # претензия: «✉ 04.10.26» отправлена, «⚠ 04.10.26» срок ответа истёк, «✓ ответ» получен
-        self.claim_state = [""] * n
-        self.court_marks = [""] * n                       # «в суд 04.10.26» — судебный приказ отправлен в суд
-        self.court_dates: list[date | None] = [None] * n
         self.court_flags = [False] * n                    # известен ли судебный участок (в карточке или за домом)
+        self.compute_claim_marks()                        # колонки «Претензия» и «Приказ» (журнал читается отдельно)
         if not (n and self.result and self.result.top and self.settings.addr_col and self.settings.flat_col):
             return
         cards, org = owners._load_all(), self.current_org()
-        claims, days = claimlog._load(), self.claim_days()
+        court_by_house = orgmod.court_map(org)
+        for idx in range(min(n, len(self.result.top))):
+            info = self.row_info(idx)
+            d = cards.get(owners.make_key(info["address"], info["flat"]))
+            if d:
+                status = owners.card_status(owners._from_dict(d), info["report_fio"])
+                self.card_flags[idx] = status != "none"
+                self.card_full[idx] = status == "full"
+                self.card_marks[idx] = {"full": "✓", "partial": "⚠"}.get(status, "✗")
+            self.court_flags[idx] = bool(court_by_house.get(orgmod.norm_addr(info["address"]), ""))
+
+    def compute_claim_marks(self, claims: dict | None = None) -> None:
+        """Метки журнала для строк результата: «✉ 04.10.26» отправлена, «⚠ 04.10.26» срок ответа истёк, «✓ ответ» получен;
+        «в суд 04.10.26» — судебный приказ подан. Ключи сортировки пусты (None) у строк без отметки — они всегда в конце."""
+        n = len(self.card_flags)
+        self.claim_marks, self.claim_state, self.claim_keys = [""] * n, [""] * n, [None] * n
+        self.court_marks, self.court_dates = [""] * n, [None] * n
+        if not (n and self.result and self.result.top and self.settings.addr_col and self.settings.flat_col):
+            return
+        claims, days = (claimlog._load() if claims is None else claims), self.claim_days()
+        rank = {claimlog.CLOSED: 1, claimlog.SENT: 2, claimlog.OVERDUE: 3}
         for idx in range(min(n, len(self.result.top))):
             info = self.row_info(idx)
             rec = claimlog.get(info["address"], info["flat"], claims)
@@ -2211,25 +2256,30 @@ class App(tk.Tk):
                 self.court_dates[idx] = filed
             st = self.claim_state[idx] = claimlog.status(rec, days)
             if st:
+                sent = claimlog.sent_date(rec)
                 self.claim_marks[idx] = {claimlog.SENT: "✉ ", claimlog.OVERDUE: "⚠ ", claimlog.CLOSED: "✓ "}[st] + (
                     "ответ" if st == claimlog.CLOSED else claimlog.short(rec["sent"]))
-            d = cards.get(owners.make_key(info["address"], info["flat"]))
-            if d:
-                status = owners.card_status(owners._from_dict(d), info["report_fio"])
-                self.card_flags[idx] = status != "none"
-                self.card_full[idx] = status == "full"
-                self.card_marks[idx] = {"full": "✓", "partial": "⚠"}.get(status, "✗")
-            self.court_flags[idx] = bool(orgmod.house_court(org, info["address"]))
+                self.claim_keys[idx] = rank[st] * 1_000_000 + sent.toordinal()      # статус, затем дата отправки
+
+    def _show_service_cells(self) -> None:
+        for item, idx in self.item_index.items():
+            vals = list(self.tree.item(item, "values"))
+            vals[:N_SERVICE] = self.service_values(idx)
+            self.tree.item(item, values=vals)
 
     def refresh_card_flags(self):
         """Карточки, дома или организация могли измениться — обновляем колонки «Данные» и «Участок» на видимой странице."""
         if not self.has_checks:
             return
         self.compute_card_flags()
-        for item, idx in self.item_index.items():
-            vals = list(self.tree.item(item, "values"))
-            vals[:N_SERVICE] = self.service_values(idx)
-            self.tree.item(item, values=vals)
+        self._show_service_cells()
+
+    def refresh_claim_marks(self, claims: dict | None = None) -> None:
+        """Изменился только журнал или срок ответа: пересчитываются колонки «Претензия» и «Приказ», остальное не трогаем."""
+        if not self.has_checks:
+            return
+        self.compute_claim_marks(claims)
+        self._show_service_cells()
 
     def sort_view(self, colid: str):
         """Сортировка таблицы кликом по заголовку — по всему списку, а не только по видимой странице.
@@ -2248,9 +2298,9 @@ class App(tk.Tk):
         elif self.has_checks and ci == 3:
             getter = lambda idx: 1 if self.court_flags[idx] else 0
         elif self.has_checks and ci == 4:
-            getter = lambda idx: ({claimlog.OVERDUE: 3, claimlog.SENT: 2, claimlog.CLOSED: 1}.get(self.claim_state[idx], 0), self.claim_marks[idx])
+            getter = lambda idx: self.claim_keys[idx]                         # None у строк без отметки — они всегда в конце
         elif self.has_checks and ci == 5:
-            getter = lambda idx: self.court_dates[idx] or date.min
+            getter = lambda idx: self.court_dates[idx]
         else:
             getter = lambda idx: self.data_rows[idx][j]
         desc = bool(self.view_sort and self.view_sort[0] == colid and not self.view_sort[1])
@@ -2274,7 +2324,7 @@ NEXT_STEPS = (
     ("Создайте документы", "Претензии, письмо в ЕИРЦ и заявления о судебном приказе."),
 )
 
-SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70, "Претензия": 96, "Приказ": 96}      # служебные колонки таблицы результата и их ширина
+SERVICE_COLS = {"✓": 36, "№": 46, "Данные": 64, "Участок": 70, "Претензия": 104, "Приказ": 116}      # служебные колонки таблицы результата и их ширина
 N_SERVICE = len(SERVICE_COLS)
 
 COLUMN_FIELDS = {
@@ -2339,8 +2389,7 @@ class SettingsDialog(Dialog):
         ttk.Button(dty.row("Ставки и проверка расчёта"), text="Таблица ставок…", command=self.edit_duty).pack()
 
         cl = widgets.section(pages["Документы"], "Претензии")
-        ttk.Spinbox(cl.row("Срок ответа, дней"), from_=1, to=365, textvariable=app.claim_days_var, width=5,
-                    command=app.after_claims_changed).pack()
+        ttk.Spinbox(cl.row("Срок ответа, дней"), from_=1, to=365, textvariable=app.claim_days_var, width=5).pack()
         upd = widgets.section(pages["Общие"], "Обновления")
         widgets.Switch(upd.row("Проверять при запуске"), app.update_var, command=app.save_settings_now).pack()
         ttk.Button(upd.row(f"Версия {app.app_version()}"), text="Проверить сейчас",
@@ -2360,8 +2409,7 @@ class SettingsDialog(Dialog):
         self.update_idletasks()
         page_h = 0
         for page in pages.values():                                  # высота по самой высокой вкладке: окно не прыгает при переключении
-            page_h = max(page_h, sum((c.body.winfo_reqheight() + 2 * c.PAD_Y if isinstance(c, widgets.Card) else c.winfo_reqheight()) + 8
-                                     for c in page.winfo_children()) + 12)
+            page_h = max(page_h, widgets.cards_height(page) + 12)
         show(tabs.selected)
         h = min(tabs.winfo_reqheight() + 12 + page_h + btns.winfo_reqheight() + 24, self.winfo_screenheight() - 140)
         self.geometry(f"{min(600, self.winfo_screenwidth() - 40)}x{h}")
@@ -2407,6 +2455,7 @@ class SettingsDialog(Dialog):
             return
         messagebox.showinfo("Готово", f"Загружено файлов: {len(names)}. Приложение будет закрыто — запустите его снова.",
                             parent=self)
+        self.app._settings_frozen = True                          # фоновые сохранения (проверка обновлений и т. п.) до закрытия не пишут
         self.app.destroy()                                        # без сохранения: иначе старые настройки затрут загруженные
 
     def close(self):
@@ -2450,8 +2499,7 @@ class CourtsDialog(Dialog):
         self.bind("<Return>", lambda e: self.destroy())
         self.bind("<Escape>", lambda e: self.destroy())
         self.update_idletasks()
-        content = sum((c.body.winfo_reqheight() + 2 * c.PAD_Y if isinstance(c, widgets.Card) else c.winfo_reqheight()) + 8
-                      for c in body.winfo_children())                      # высота карточек Canvas подтягивается позже, берём высоту их содержимого
+        content = widgets.cards_height(body)
         self.geometry(f"{min(580, self.winfo_screenwidth() - 40)}x{min(content + btns.winfo_reqheight() + 70, self.winfo_screenheight() - 140)}")
         self.resizable(False, False)
         center_over(self, app)
@@ -3196,7 +3244,7 @@ class DocsDialog(Dialog):
             ttk.Label(body, text="Организация:\n" + "\n".join(f"• {g}" for g in general), style="Warn.TLabel",
                       wraplength=640, justify="left").pack(anchor="w", pady=(0, 6))
         if rows:
-            ttk.Label(body, text=summary + ". Документы всё равно будут созданы, недостающие поля останутся пустыми (____).",
+            ttk.Label(body, text=summary + ". Документы всё равно будут созданы: недостающие поля останутся пустыми (____), а пометки «уже отправлена/подан» — только предупреждение.",
                       style="Warn.TLabel", wraplength=640, justify="left").pack(anchor="w")
             box = ttk.Frame(body)
             box.pack(fill="both", expand=True, pady=(4, 8))
@@ -3536,8 +3584,7 @@ class OwnerDialog(Dialog):
     def open_houses(self):
         """Переход к списку домов организации (Настройки → Организации → Дома) с выбранным домом; потом данные обновляются."""
         app = self.app
-        dlg = OrgDialog(app, app.orgs, self.org.name, on_close=lambda name: app.refresh_orgs(name),
-                        focus_address=self.info["address"])
+        dlg = app.edit_orgs(self.org.name, focus_address=self.info["address"])
         self.wait_window(dlg)
         self.org = app.current_org()
         self.render_house_box()

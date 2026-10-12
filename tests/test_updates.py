@@ -1,3 +1,5 @@
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import tkinter as tk
 import unittest
 from datetime import date
@@ -37,7 +39,12 @@ class CheckTests(unittest.TestCase):
 
 class AppUpdateTests(unittest.TestCase):
     def setUp(self):
-        self.old = (app.save_settings, app.messagebox.showinfo, app.messagebox.askyesno, updates.check, app.App.app_version)
+        saved = (app.save_settings, app.messagebox.showinfo, app.messagebox.askyesno, updates.check, app.App.__dict__["app_version"])
+
+        def restore():
+            app.save_settings, app.messagebox.showinfo, app.messagebox.askyesno, updates.check = saved[:4]
+            app.App.app_version = saved[4]                                  # исходный staticmethod, а не обычная функция
+        self.addCleanup(restore)                                           # до подмен: сработает и при skipTest
         app.save_settings = lambda s: None
         self.shown = []
         app.messagebox.showinfo = lambda *a, **kw: self.shown.append(a[1])
@@ -47,10 +54,7 @@ class AppUpdateTests(unittest.TestCase):
             self.app = app.App()
         except tk.TclError:
             self.skipTest("нет дисплея")
-
-    def tearDown(self):
-        self.app.destroy()
-        app.save_settings, app.messagebox.showinfo, app.messagebox.askyesno, updates.check, app.App.app_version = self.old
+        self.addCleanup(self.app.destroy)
 
     def test_newer_version_shows_bar_and_skip_hides_it(self):
         info = {"tag": "1.0.20", "url": "https://example.com", "notes": ""}

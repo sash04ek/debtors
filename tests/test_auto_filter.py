@@ -1,4 +1,6 @@
 """Фильтрация сразу при открытии файла."""
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import tempfile
 import unittest
 from pathlib import Path

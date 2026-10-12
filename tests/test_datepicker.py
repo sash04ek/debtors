@@ -1,4 +1,6 @@
 """Выбор даты: разбор, форматирование и календарь."""
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import sys
 import tkinter as tk
 import unittest

@@ -1,4 +1,6 @@
 """Список судебных участков: python -m unittest discover tests"""
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import sys
 import tempfile
 import unittest

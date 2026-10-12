@@ -1,3 +1,5 @@
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import tempfile
 import tkinter as tk
 import unittest

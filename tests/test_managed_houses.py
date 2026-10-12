@@ -1,4 +1,6 @@
 """Отбор только домов, которые сейчас в управлении: python -m unittest discover tests"""
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import sys
 import unittest
 from datetime import date
