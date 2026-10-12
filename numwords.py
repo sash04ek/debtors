@@ -23,6 +23,9 @@ def _plural(n: int, forms: tuple[str, str, str]) -> str:
     return forms[0] if n % 10 == 1 else forms[1] if 2 <= n % 10 <= 4 else forms[2]
 
 
+plural = _plural                                   # публичное имя: «1 адрес, 2 адреса, 5 адресов»
+
+
 def _triplet(n: int, female: bool) -> list[str]:
     ones = _ONES_F if female else _ONES_M
     words = []

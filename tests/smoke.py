@@ -31,6 +31,13 @@ def main() -> None:
         dlg.destroy()
     cd.destroy()
     sd.destroy()
+    for dlg in (app.ClaimSentDialog(a, 2, 40), app.ClaimSentDialog(a, 2, 0, court=True), app.ClaimsDueDialog(a)):
+        dlg.update()
+        dlg.destroy()
+    a.show_update_bar({"tag": "9.9.9", "url": "https://example.com"})        # плашки над панелью инструментов
+    a.check_claim_reminders()
+    a.update()
+    a.hide_update_bar()
     od = app.OrgDialog(a, a.orgs, org.name, on_close=lambda n: None)
     od.update()
     od.destroy()

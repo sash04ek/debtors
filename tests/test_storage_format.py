@@ -1,4 +1,6 @@
 """Атомарная запись и версия схемы файлов данных: python -m unittest discover tests"""
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import json
 import os
 import sys

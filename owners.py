@@ -121,19 +121,21 @@ def _from_dict(d: dict) -> Card:
     return Card(**{k: v for k, v in d.items() if k in names})
 
 
-def get_card(address, flat) -> Card | None:
-    d = _load_all().get(make_key(address, flat))
+def get_card(address, flat, cards: dict | None = None) -> Card | None:
+    """cards — уже прочитанные карточки (чтобы не разбирать owners.json заново на каждую строку)."""
+    d = (_load_all() if cards is None else cards).get(make_key(address, flat))
     return _from_dict(d) if d else None
 
 
-def get_or_new(address, flat) -> Card:
+def get_or_new(address, flat, cards: dict | None = None) -> Card:
     """Сохранённая карточка либо новая, в которую подставлены данные по дому из соседних карточек."""
-    card = get_card(address, flat)
+    cards = _load_all() if cards is None else cards
+    card = get_card(address, flat, cards)
     if card:
         return card
     card = Card(address=str(address or "").strip(), flat=re.sub(r"['’`]+", "", str(flat or "")).strip())
     prefix = make_key(address, "").split("|")[0] + "|"
-    for key, d in _load_all().items():
+    for key, d in cards.items():
         if key.startswith(prefix):
             for f in HOUSE_FIELDS:
                 if d.get(f) and not getattr(card, f):

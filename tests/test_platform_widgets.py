@@ -1,4 +1,6 @@
 """Элементы управления на разных платформах: macOS — свои «как в настройках macOS», Windows/Linux — стандартные ttk."""
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import sys
 import unittest
 from tkinter import ttk

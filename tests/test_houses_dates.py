@@ -1,4 +1,6 @@
 """Дома: дата прихода, дата ухода и признак «ушёл»; миграция прежних записей."""
+import _isolate                      # DEBTORS_HOME во временную папку, до импорта storage
+HOME = _isolate.HOME
 import json
 import sys
 import tempfile

@@ -261,6 +261,12 @@ class Card(tk.Canvas):
         return right
 
 
+def cards_height(frame: tk.Misc, gap: int = 8) -> int:
+    """Высота содержимого окна из карточек: у Canvas-карточки реальная высота подтягивается позже, поэтому берётся высота её тела."""
+    return sum((c.body.winfo_reqheight() + 2 * c.PAD_Y if isinstance(c, Card) else c.winfo_reqheight()) + gap
+               for c in frame.winfo_children())
+
+
 def section(parent: tk.Misc, title: str, pady: tuple = (14, 0)) -> Card:
     """Заголовок блока (жирным над карточкой) и сама карточка."""
     head = ttk.Label(parent, text=title, font=bold_font(parent))

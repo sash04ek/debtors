@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import re
 from datetime import date, timedelta
 
 import orgs
@@ -10,6 +11,15 @@ import owners
 import storage
 
 DEFAULT_DAYS = 40
+MAX_DAYS = 365                                     # верхняя граница срока ответа: больше — дата выходит за пределы date
+
+
+def clamp_days(value) -> int:
+    """Срок ответа в днях из любого ввода: не число — по умолчанию, иначе от 1 до MAX_DAYS."""
+    try:
+        return min(MAX_DAYS, max(1, int(value)))
+    except (TypeError, ValueError):
+        return DEFAULT_DAYS
 
 # статусы записи
 SENT, OVERDUE, CLOSED = "sent", "overdue", "closed"
@@ -21,7 +31,7 @@ def _load() -> dict[str, dict]:
 
 
 def _save(data: dict[str, dict]) -> None:
-    storage.save_json(storage.CLAIMS_PATH, "claims", data)
+    storage.save_json(storage.CLAIMS_PATH, "claims", data, private=True)      # адреса должников — как карточки собственников, права 600
 
 
 def key_of(address, flat) -> str:
@@ -130,15 +140,24 @@ def status(rec: dict | None, days: int, today: date | None = None) -> str:
     return OVERDUE if (today or date.today()) >= due_date(rec, days) else SENT
 
 
-def overdue(days: int, today: date | None = None) -> list[dict]:
+def sent_date(rec: dict | None) -> date | None:
+    return _day((rec or {}).get("sent", ""))
+
+
+def _natural(text: str) -> list:
+    """Ключ «натуральной» сортировки: «дом 2» раньше «дом 10»."""
+    return [(0, int(p), "") if p.isdigit() else (1, 0, p) for p in re.split(r"(\d+)", str(text).casefold()) if p != ""]
+
+
+def overdue(days: int, today: date | None = None, data: dict | None = None) -> list[dict]:
     """Записи с истёкшим сроком ответа, самые давние первыми; в запись добавлены due (срок) и late (дней просрочки)."""
     today = today or date.today()
     out = []
-    for rec in _load().values():
+    for rec in (_load() if data is None else data).values():
         if status(rec, days, today) == OVERDUE:
             due = due_date(rec, days)
             out.append(rec | {"due": due.isoformat(), "late": (today - due).days})
-    return sorted(out, key=lambda r: (r["sent"], orgs.norm_addr(r.get("address", "")), str(r.get("flat", ""))))
+    return sorted(out, key=lambda r: (r["sent"], _natural(orgs.norm_addr(r.get("address", ""))), _natural(r.get("flat", ""))))
 
 
 def short(text: str) -> str:
