@@ -60,6 +60,7 @@ class Settings:
     theme: str = "system"               # оформление: system — как в системе, light — светлое, dark — тёмное
     org_markers: list[str] = field(default_factory=lambda: list(DEFAULT_ORG_MARKERS))
     markers_version: int = MARKERS_VERSION   # для дозаписи новых слов в сохранённый список
+    zip_docs: bool = False              # после создания документов собирать ещё и zip (читается в Windows, в отличие от архива Finder)
     claim_reply_days: int = 40          # через сколько дней после отправки претензии напомнить, что срок ответа истёк
     update_check: bool = True           # раз в сутки при запуске узнавать о новой версии (запрос к GitHub, без передачи данных)
     update_checked: str = ""            # дата последней проверки (ГГГГ-ММ-ДД)

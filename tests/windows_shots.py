@@ -122,6 +122,11 @@ def main():
         settle(dlg)
         shot(dlg, f"{mode_tag}-{name}", dark)
         dlg.destroy()
+    dd = app.DocsDialog(a, "Претензии", "ООО УО «Ромашка»", "Претензий: 13", *a.check_problems("claims", [0, 1, 2, 3]),
+                        Path(tempfile.gettempdir()), general=["не заполнено: подписант (Организации → Письмо в ЕИРЦ)"])
+    settle(dd)
+    shot(dd, f"{mode_tag}-06e-docs-confirm", dark)
+    dd.destroy()
     a.hide_update_bar()
     # открытое меню «Файл»: рисуется самим Tk, поэтому снимок делаем обычным способом
     menu = a.menus["Файл"]

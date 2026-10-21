@@ -1644,7 +1644,13 @@ class App(tk.Tk):
             orgmod.save_orgs(self.orgs)
 
     def finish_docs(self, title: str, text: str, folder: Path):
-        """Итог создания; предлагает открыть папку с документами."""
+        """Итог создания; при выбранной опции собирает zip; предлагает открыть папку с документами."""
+        if getattr(self, "_want_zip", False) and getattr(self, "_made", None):
+            try:
+                text += f"\nАрхив: {claim.zip_docs(self._made, folder / self._zip_name).name}"
+            except OSError as e:
+                text += f"\nАрхив не создан: {e}"
+        self._want_zip, self._made = False, []
         if messagebox.askyesno(title, f"{text}\n\nОткрыть папку?"):
             open_folder(folder)
 
@@ -1672,7 +1678,7 @@ class App(tk.Tk):
             count = f"Заявлений: {sum(len(j['cases']) for j in jobs)} (адресов: {len(pick)})"
         summary, rows = self.check_problems(kind, pick)
         dlg = DocsDialog(self, title, org.name, count, summary, rows, Path(s.out_dir) if s.out_dir else DEFAULT_OUT_DIR,
-                         general=precheck.org_issues(kind, org))
+                         general=precheck.org_issues(kind, org), zip_on=s.zip_docs)
         self.wait_window(dlg)
         if not dlg.ok:
             return
@@ -1683,7 +1689,10 @@ class App(tk.Tk):
             messagebox.showerror("Ошибка", f"Не удалось создать папку:\n{out}\n{e}")
             return
         s.out_dir = str(out)
+        s.zip_docs = self._want_zip = bool(getattr(dlg, "zip", False))
         self.save_settings_now()
+        self._made: list[Path] = []                                  # файлы этого запуска — для zip
+        self._zip_name = claim.safe_name(f"{title} {org.name} {date.today():%Y-%m-%d}".replace("«", "").replace("»", ""), claim.MAX_STEM) + ".zip"
         {"claims": self._gen_claims, "letter": self._gen_letter, "court": self._gen_court}[kind](org, pick, out, jobs)
 
     def _gen_claims(self, org, pick, out: Path, _jobs):
@@ -1700,6 +1709,7 @@ class App(tk.Tk):
                 fn = f"{k + 1:02d} " + claim.file_name(row[ni], addr, flat)
                 claim.build_claim(org, address=addr, flat=flat, debt=self.result.amounts[k],
                                   on_date=today, path=out / fn)
+                self._made.append(out / fn)
                 made += 1
                 prog.step(n, fn)
         except Exception as e:
@@ -1723,6 +1733,7 @@ class App(tk.Tk):
             messagebox.showerror("Ошибка", f"Не удалось сформировать письмо:\n{e}")
             return
         poa = orgmod.copy_poa(org, "mail", out)
+        self._made += [path] + ([poa] if poa else [])
         note = f"\nДоверенность: {poa.name}" if poa else "\nДоверенность для почты не задана (Организации → Доверенности)."
         self.finish_docs("Готово", f"Адресов в письме: {n}\nОрганизация: {org.name}\n{path}{note}", out)
 
@@ -1768,6 +1779,7 @@ class App(tk.Tk):
                         duty_val = duty.court_order_duty(case.debt + (case.penalty or 0), self.settings.duty_scale or None,
                                                          self.settings.duty_share)
                         n_duty += 1
+                    self._made.append(out / fn)
                     if court.build_court_application(org, card, case, path=out / fn, court_obj=court_obj, duty=duty_val):
                         n_known += 1
                     else:
@@ -1793,6 +1805,8 @@ class App(tk.Tk):
         if prog.cancelled:
             note += "\n\nСоздание прервано пользователем."
         poa = orgmod.copy_poa(org, "court", out) if n_known + n_unknown else None
+        if poa:
+            self._made.append(poa)
         note += (f"\n\nДоверенность: {poa.name}" if poa else
                  "\n\nДоверенность для суда не задана (Организации → Доверенности).") if n_known + n_unknown else ""
         self.finish_docs("Готово", f"Заявлений: {n_known + n_unknown}\n"
@@ -3231,11 +3245,11 @@ class DocsDialog(Dialog):
     """Подтверждение перед созданием документов: сколько будет создано, что не заполнено и в какую папку сохранить."""
 
     def __init__(self, app: "App", title: str, org_name: str, count: str, summary: str, rows: list[tuple], folder: Path,
-                 general: list[str] | None = None):
+                 general: list[str] | None = None, zip_on: bool = False):
         super().__init__(app)
         self.title(title)
         self.transient(app)
-        self.ok, self.folder = False, folder
+        self.ok, self.folder, self.zip = False, folder, zip_on
         body = ttk.Frame(self, padding=14)
         body.pack(fill="both", expand=True)
         ttk.Label(body, text=title, font=("", 14, "bold")).pack(anchor="w")
@@ -3264,6 +3278,8 @@ class DocsDialog(Dialog):
         self.folder_lbl = ttk.Label(frow, text=str(folder), wraplength=470, justify="left")
         self.folder_lbl.pack(side="left", padx=6, fill="x", expand=True)
         ttk.Button(frow, text="Изменить…", command=self.choose).pack(side="right")
+        self.zip_var = tk.BooleanVar(value=zip_on)
+        ttk.Checkbutton(body, text="Собрать ещё и ZIP-архив", variable=self.zip_var).pack(anchor="w", pady=(8, 0))
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(12, 0))
         pack_ok_cancel(ttk.Button(btns, text="Создать", command=self.accept), ttk.Button(btns, text="Отмена", command=self.destroy),
@@ -3280,7 +3296,7 @@ class DocsDialog(Dialog):
             self.folder_lbl.config(text=p)
 
     def accept(self):
-        self.ok = True
+        self.ok, self.zip = True, self.zip_var.get()
         self.destroy()
 
 
