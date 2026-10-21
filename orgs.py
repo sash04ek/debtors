@@ -193,7 +193,7 @@ def copy_poa(org: "Organization", kind: str, out_dir) -> Path | None:
     if p is None:
         return None
     label = re.sub(r'[\\/:*?"<>|«»]', "", org.name).strip()
-    dest = Path(out_dir) / f"Доверенность {POA_KINDS[kind]} {label}{p.suffix}"
+    dest = Path(out_dir) / (f"Доверенность {POA_KINDS[kind]} {label}"[:70].rstrip(" ._") + p.suffix)     # короткое имя: путь в Windows ≤ 260 знаков
     shutil.copyfile(p, dest)
     return dest
 
