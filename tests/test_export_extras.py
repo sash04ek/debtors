@@ -53,6 +53,21 @@ class ExtrasRowTest(unittest.TestCase):
         self.assertEqual(len(set(h)), len(h))
 
 
+class ExportNameTest(unittest.TestCase):
+    def test_org_in_default_name(self):
+        self.assertEqual(app.export_file_name("ООО УО «Ромашка»", "Долг поквартирно 09.2026", 20),
+                         "ООО УО Ромашка_Долг поквартирно 09.2026_топ20.xlsx")
+        self.assertEqual(app.export_file_name("ООО УО «Ромашка»", "", 5), "ООО УО Ромашка_должники.xlsx")
+
+    def test_org_not_duplicated_and_name_is_safe(self):
+        self.assertEqual(app.export_file_name("ООО УО «Ромашка»", "ООО УО Ромашка_отчёт_топ20", 20),
+                         "ООО УО Ромашка_отчёт_топ20_топ20.xlsx")
+        name = app.export_file_name('ООО "А/Б: очень длинное название управляющей компании ' + "я" * 80 + '"', "файл", 3)
+        self.assertNotRegex(name, r'[\\/:*?"<>|]')
+        self.assertLessEqual(len(name), 120 + len(".xlsx"))
+        self.assertEqual(app.export_file_name("", "файл", 3), "файл_топ3.xlsx")
+
+
 class ExportFileTest(unittest.TestCase):
     def test_extra_columns_written_and_dropped_on_reading(self):
         s = core.Settings(top_n=20, name_col="ФИО", debt_col="Долг", addr_col="Адрес", flat_col="Кв")
@@ -91,7 +106,8 @@ class AppExportTest(unittest.TestCase):
         app.messagebox.showinfo = lambda *a, **kw: self.infos.append(a[1])
         app.messagebox.showerror = lambda *a, **kw: self.errors.append(a)
         self.out = Path(self.tmp.name) / "out.xlsx"
-        app.filedialog.asksaveasfilename = lambda **kw: str(self.out)
+        self.asked = []
+        app.filedialog.asksaveasfilename = lambda **kw: (self.asked.append(kw), str(self.out))[1]
         owners._load_all = lambda: {owners.make_key("Тестовая ул 1", "1"): CARD}
         try:
             self.app = app.App()
@@ -111,6 +127,7 @@ class AppExportTest(unittest.TestCase):
         claimlog.mark_sent([("Тестовая ул 1", "1")], date.today() - timedelta(days=3))
         a.export()
         self.assertEqual(self.errors, [])
+        self.assertIn(a.current_org().name.replace("«", "").replace("»", ""), self.asked[-1]["initialfile"])    # УК в имени файла
         self.assertIn("персональные данные", self.infos[-1])                           # предупреждение: в файле паспорта и адреса
         ws = load_workbook(self.out)["Топ-2 должников"]
         head = [c.value for c in ws[1]]

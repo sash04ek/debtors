@@ -66,6 +66,16 @@ def save_settings(s: core.Settings) -> None:
         pass
 
 
+def export_file_name(org_name: str, stem: str, n: int) -> str:
+    """Имя файла для «Сохранить в Excel»: название организации (УК), исходное имя и число должников. Название не дублируется,
+    если оно уже есть в имени исходного файла (например, при пересохранении отфильтрованного списка)."""
+    org = claim.safe_name(re.sub(r"[«»\"]", "", org_name or "").strip())[:40].rstrip(" ._") if (org_name or "").strip() else ""
+    base = f"{stem}_топ{n}" if stem else "должники"
+    if org and org.lower() not in base.lower():
+        base = f"{org}_{base}"
+    return claim.safe_name(base)[:120].rstrip(" ._") + ".xlsx"
+
+
 def make_tip(parent: tk.Misc, text: str) -> tk.Toplevel:
     """Безрамочное окошко-подсказка (на macOS — системного стиля)."""
     tip = tk.Toplevel(parent)
@@ -2045,7 +2055,7 @@ class App(tk.Tk):
     def export(self):
         if not self.result:
             return
-        default = f"{self.path.stem}_топ{len(self.result.top)}.xlsx" if self.path else "должники.xlsx"
+        default = export_file_name(self.current_org().name, self.path.stem if self.path else "", len(self.result.top))
         p = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile=default,
                                          filetypes=[("Excel", "*.xlsx")])
         if not p:
