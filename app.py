@@ -1713,7 +1713,7 @@ class App(tk.Tk):
     def _gen_letter(self, org, pick, out: Path, _jobs):
         s, h = self.settings, self.result.headers
         fi = h.index(s.flat_col)
-        name = f"Письмо в ЕИРЦ {org.name}.docx".replace("«", "").replace("»", "").replace('"', "")
+        name = claim.safe_name(f"Письмо в ЕИРЦ {org.name}".replace("«", "").replace("»", ""), claim.MAX_STEM) + ".docx"
         path = out / name
         try:
             n = claim.build_letter(org, items=[orgmod.addr_flat(self.row_addr(self.result.top[k]), self.result.top[k][fi])
@@ -1760,8 +1760,8 @@ class App(tk.Tk):
                         break
                     who = case.owner.fio if case.owner else "собственник не известен"
                     num = f"{k + 1:02d}" + (f"-{j}" if len(cases) > 1 else "")
-                    fn = f"{num} " + claim.safe_name(
-                        f"Заявление о судебном приказе {who} {info['address']} кв {claim.clean_flat(info['flat'])}") + ".docx"
+                    fn = f"{num} " + claim.doc_name("Судебный приказ", who, info["address"], info["flat"],
+                                                    shorten=bool(case.owner)) + ".docx"
                     no_court += 0 if court_obj else 1
                     duty_val = None
                     if self.settings.duty_auto and case.debt is not None and not (card.duty or "").strip():

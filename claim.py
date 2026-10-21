@@ -48,8 +48,34 @@ def money(v: float) -> str:
     return f"{v:,.2f}".replace(",", " ").replace(".", ",")
 
 
-def safe_name(s: str) -> str:
-    return re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", s).strip(" ._")[:100] or "претензия"
+MAX_STEM = 70      # имя файла без номера и расширения: Windows не открывает путь длиннее 260 знаков, а при неверной кодировке
+                   # имён в zip каждая русская буква удваивается — длинные имена «не извлекаются» («Слишком длинный конечный путь»)
+
+
+def safe_name(s: str, limit: int = 100) -> str:
+    return re.sub(r'[\\/:*?"<>|\r\n\t]+', "_", s).strip(" ._")[:limit] or "претензия"
+
+
+def short_fio(fio) -> str:
+    """«ИВАНОВ ИВАН ИВАНОВИЧ» → «Иванов И. И.»; инициалы и одно слово остаются как есть."""
+    words = re.sub(r"\s+", " ", str(fio or "")).strip().split(" ")
+    if not words[0]:
+        return ""
+    out = ["-".join(p.capitalize() for p in words[0].split("-"))]
+    for w in words[1:]:
+        out.append(w.upper() if re.fullmatch(r"(?:[А-ЯЁA-Zа-яёa-z]\.)+", w) else w[:1].upper() + ".")
+    return " ".join(out)
+
+
+def doc_name(prefix: str, fio: str, address: str, flat, limit: int = MAX_STEM, shorten: bool = True) -> str:
+    """Имя файла без расширения: «Претензия Иванов И. И. Тестовая ул 1 кв 5». ФИО сокращается до инициалов, длинный адрес
+    обрезается с конца, а «кв N» остаётся; уникальность даёт номер, который добавляет вызывающий."""
+    tail = f" кв {clean_flat(flat)}"
+    body = f"{prefix} {short_fio(fio) if shorten else fio} {address}".strip()
+    room = max(limit - len(tail), 0)
+    if len(body) > room:
+        body = body[:room].rstrip(" ,._-")
+    return safe_name(body + tail, limit)
 
 
 def _runs(par, text: str, size: Pt):
@@ -202,4 +228,4 @@ def build_letter(org: Organization, *, items: list[tuple[str, object]], on_date:
 
 
 def file_name(fio, address, flat) -> str:
-    return safe_name(f"Претензия {fio} {address} кв {clean_flat(flat)}") + ".docx"
+    return doc_name("Претензия", fio, address, flat) + ".docx"
