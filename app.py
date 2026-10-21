@@ -22,6 +22,7 @@ import datepicker
 import native_date
 import numwords
 import duty
+import extras
 import courts as courtsmod
 import orgs as orgmod
 import precheck
@@ -2060,11 +2061,30 @@ class App(tk.Tk):
                 "title": self.sheet.title if self.sheet else "",
                 "sort_col": s.sort_col, "sort_desc": s.sort_desc,
             }
-            core.export(self.result, p, s.debt_col, meta)
+            heads, rows = self.export_extras()
+            core.export(self.result, p, s.debt_col, meta, heads, rows)
         except Exception as e:
             messagebox.showerror("Ошибка", f"Не удалось сохранить:\n{e}")
             return
-        messagebox.showinfo("Готово", f"Сохранено:\n{p}")
+        personal = any(any(v for v in r[extras.PERSONAL_FROM:]) for r in rows)
+        messagebox.showinfo("Готово", f"Сохранено:\n{p}" + ("\n\nВ файл вошли персональные данные собственников (паспорт, адреса): "
+                                                          "храните и передавайте его только защищённым способом." if personal else ""))
+
+    def export_extras(self) -> tuple[list[str], list[list]]:
+        """Флаги и персональные данные собственников по каждой строке списка для «Сохранить в Excel» (пусто, если данных нет)."""
+        s, top = self.settings, self.result.top
+        have = bool(s.addr_col and s.flat_col and s.name_col)
+        cards, claims, days = owners._load_all(), claimlog._load(), self.claim_days()
+        org, courts_list = self.current_org(), courtsmod.load()["courts"]
+        by_house, names = orgmod.court_map(org), {c.code: c.name for c in courts_list}
+        rows = []
+        for k in range(len(top)):
+            info = self.row_info(k) if have else {"address": "", "flat": "", "report_fio": ""}
+            code = by_house.get(orgmod.norm_addr(info["address"]), "") if have else ""
+            rows.append(extras.row(info, cards.get(owners.make_key(info["address"], info["flat"])) if have else None,
+                                   claimlog.get(info["address"], info["flat"], claims) if have else None, days,
+                                   names.get(code, code)))
+        return extras.unique_headers(self.result.headers), rows
 
     def show_rows(self, headers, rows, numbered=False):
         """Загружает данные в таблицу и показывает первую страницу. numbered — режим результата (✓, №, отметки)."""
