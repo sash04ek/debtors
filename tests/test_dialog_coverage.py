@@ -8,7 +8,7 @@ import app
 
 # Окна, которых пока нет ни в снимках Windows, ни в проверке запуска. Список только сокращается: новое окно сюда не добавляют,
 # а подключают к tests/windows_shots.py и tests/smoke.py (правило AGENTS.md).
-UNCOVERED = {"CourtChoiceDialog", "CourtEditDialog", "CourtsEditorDialog", "DocsDialog", "ProgressWindow", "WelcomeDialog"}
+UNCOVERED = {"CourtChoiceDialog", "CourtEditDialog", "CourtsEditorDialog", "ProgressWindow", "WelcomeDialog"}
 
 
 class DialogCoverageTest(unittest.TestCase):

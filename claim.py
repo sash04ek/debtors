@@ -67,6 +67,16 @@ def short_fio(fio) -> str:
     return " ".join(out)
 
 
+def zip_docs(files: list[Path], dest: Path) -> Path:
+    """Собирает файлы в zip с плоскими именами. Имена пишутся в UTF-8 с признаком в заголовке (так делает zipfile для не-ASCII имён),
+    поэтому проводник Windows читает русские имена; архив, сжатый Finder-ом на macOS, они портят (кракозябры и «слишком длинный путь»)."""
+    import zipfile
+    with zipfile.ZipFile(dest, "w", zipfile.ZIP_DEFLATED) as z:
+        for f in files:
+            z.write(f, Path(f).name)
+    return Path(dest)
+
+
 def doc_name(prefix: str, fio: str, address: str, flat, limit: int = MAX_STEM, shorten: bool = True) -> str:
     """Имя файла без расширения: «Претензия Иванов И. И. Тестовая ул 1 кв 5». ФИО сокращается до инициалов, длинный адрес
     обрезается с конца, а «кв N» остаётся; уникальность даёт номер, который добавляет вызывающий."""

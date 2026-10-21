@@ -52,3 +52,17 @@ class FileNamesTest(unittest.TestCase):
             self.assertLessEqual(len(dest.name), 70 + len(".docx"))
             self.assertTrue(dest.name.endswith(".docx"))
         self.assertLessEqual(len(claim.safe_name(f"Письмо в ЕИРЦ {org.name}", claim.MAX_STEM)), claim.MAX_STEM)
+
+
+class ZipDocsTest(unittest.TestCase):
+    def test_zip_has_flat_utf8_names(self):
+        import zipfile
+        with tempfile.TemporaryDirectory() as d:
+            a = Path(d) / "01 Претензия Иванов И. И. Тестовая ул 1 кв 5.docx"
+            a.write_bytes(b"data")
+            z = claim.zip_docs([a], Path(d) / "Претензии.zip")
+            with zipfile.ZipFile(z) as f:
+                info = f.infolist()[0]
+                self.assertEqual(info.filename, a.name)                      # без путей
+                self.assertTrue(info.flag_bits & 0x800)                      # признак UTF-8: проводник Windows читает русские имена
+                self.assertEqual(f.read(info), b"data")

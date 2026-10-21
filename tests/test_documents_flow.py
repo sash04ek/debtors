@@ -63,6 +63,28 @@ class DocumentsFlowTest(unittest.TestCase):
         a.create_docs("letter")
         self.assertEqual(len(list(self.out.glob("Письмо*.docx"))), 1)
 
+    def test_zip_option_packs_exactly_this_run(self):
+        import zipfile
+        self._prepare(4)
+        a = self.app
+        (self.out / "старый архив.zip").write_bytes(b"old")
+
+        def go():
+            dlg = [w for w in a.winfo_children() if isinstance(w, app.DocsDialog)][0]
+            dlg.folder = self.out
+            dlg.zip_var.set(True)
+            dlg.accept()
+        a.after(200, go)
+        a.create_docs("claims")
+        zips = [z for z in self.out.glob("*.zip") if z.name != "старый архив.zip"]
+        self.assertEqual(len(zips), 1)
+        with zipfile.ZipFile(zips[0]) as f:
+            names = f.namelist()
+        self.assertEqual(sorted(names), sorted(p.name for p in self.out.glob("*.docx")))
+        self.assertEqual(len(names), 4)
+        self.assertTrue(a.settings.zip_docs)
+        self.assertIn("Архив:", self.asked[-1])
+
     def test_court_reports_problems_and_creates_applications(self):
         self._prepare(3)
         a = self.app
