@@ -3279,7 +3279,7 @@ class DocsDialog(Dialog):
         self.folder_lbl.pack(side="left", padx=6, fill="x", expand=True)
         ttk.Button(frow, text="Изменить…", command=self.choose).pack(side="right")
         self.zip_var = tk.BooleanVar(value=zip_on)
-        ttk.Checkbutton(body, text="Собрать ещё и ZIP-архив (имена файлов читаются в Windows)", variable=self.zip_var).pack(anchor="w", pady=(8, 0))
+        ttk.Checkbutton(body, text="Собрать ещё и ZIP-архив", variable=self.zip_var).pack(anchor="w", pady=(8, 0))
         btns = ttk.Frame(body)
         btns.pack(fill="x", pady=(12, 0))
         pack_ok_cancel(ttk.Button(btns, text="Создать", command=self.accept), ttk.Button(btns, text="Отмена", command=self.destroy),
