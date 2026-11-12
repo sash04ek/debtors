@@ -240,6 +240,7 @@ class Result:
     top: list[list]            # отобранные строки (исходные значения)
     amounts: list[float]
     stats: dict
+    offset: int = 0            # сколько должников пропущено до этой порции («следующие 20»): №, имена файлов — с offset + 1
 
 
 _RESIDENT_FLAT = re.compile(r"^\s*['’`]?\d")
@@ -315,8 +316,10 @@ def sort_by_values(items: list, get, desc: bool) -> list:
     return [it for _, it in keyed] + [it for _, it in empty]
 
 
-def process(sheet: Sheet, s: Settings, org=None) -> Result:
-    """org — организация: если у неё заданы дома, берутся только строки этих домов."""
+def process(sheet: Sheet, s: Settings, org=None, offset: int = 0) -> Result:
+    """org — организация: если у неё заданы дома, берутся только строки этих домов.
+    offset — сколько первых должников (в порядке сортировки) пропустить: «следующие N» после уже обработанных.
+    Сдвиг за конец списка прижимается к последней порции, отрицательный — к началу."""
     if not s.name_col or not s.debt_col:
         raise ValueError("Выберите колонки «ФИО / Наименование» и «Сумма долга».")
     idx = {h: i for i, h in enumerate(sheet.headers)}
@@ -368,7 +371,9 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
         persons = sort_by_values(persons, lambda p: p[1][ci], s.sort_desc)
     elif not s.sort_desc:
         persons.sort(key=lambda x: x[0])                        # по сумме долга по возрастанию
-    top = persons[:max(1, int(s.top_n))]
+    n = max(1, int(s.top_n))
+    offset = max(0, min(int(offset), (len(persons) - 1) // n * n if persons else 0))
+    top = persons[offset:offset + n]
     return Result(
         headers=sheet.headers,
         top=[r for _, r in top],
@@ -382,8 +387,11 @@ def process(sheet: Sheet, s: Settings, org=None) -> Result:
             "без долга / сумма не распознана": skipped_amount,
             "физлиц с долгом": len(persons),
             "отобрано": len(top),
+            "отобрано с №": offset + 1 if top else 0,
+            "отобрано по №": offset + len(top),
             "сумма долга отобранных": sum(a for a, _ in top),
         },
+        offset=offset,
     )
 
 
@@ -399,7 +407,9 @@ def export(result: Result, path: str | Path, debt_col: str, meta: dict | None = 
     файла они отбрасываются — в служебный лист записано число отчётных колонок."""
     wb = Workbook()
     ws = wb.active
-    ws.title = f"Топ-{len(result.top)} должников"
+    first = result.offset + 1
+    ws.title = (f"Топ-{len(result.top)} должников" if not result.offset
+                else f"Топ-{first}–{result.offset + len(result.top)} должников")
     di = result.headers.index(debt_col)
     extra_headers = list(extra_headers or [])
     ws.append(["№"] + result.headers + extra_headers)
@@ -407,7 +417,7 @@ def export(result: Result, path: str | Path, debt_col: str, meta: dict | None = 
         row = list(row)
         row[di] = amt
         extra = list(extra_rows[n - 1]) if extra_rows else []
-        ws.append([n] + row + (extra + [None] * (len(extra_headers) - len(extra))))
+        ws.append([result.offset + n] + row + (extra + [None] * (len(extra_headers) - len(extra))))
 
     bold = Font(bold=True)
     fill = PatternFill("solid", fgColor="DDEBF7")
@@ -433,7 +443,8 @@ def export(result: Result, path: str | Path, debt_col: str, meta: dict | None = 
     st.column_dimensions["B"].width = 18
 
     info = {"app": "debtors", "format": 1, "kind": "filtered", "debt_col": debt_col,
-            "headers": result.headers, "n_columns": len(result.headers), "stats": result.stats, "created": date.today().isoformat()}
+            "headers": result.headers, "n_columns": len(result.headers), "stats": result.stats, "created": date.today().isoformat(),
+            "offset": result.offset}
     info.update(meta or {})
     ms = wb.create_sheet(META_SHEET)
     ms["A1"] = json.dumps(info, ensure_ascii=False)
