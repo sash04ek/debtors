@@ -391,18 +391,23 @@ META_SHEET = "_debtors_meta"          # скрытый служебный лис
 STATS_SHEET = "Статистика"
 
 
-def export(result: Result, path: str | Path, debt_col: str, meta: dict | None = None) -> None:
+def export(result: Result, path: str | Path, debt_col: str, meta: dict | None = None,
+           extra_headers: list[str] | None = None, extra_rows: list[list] | None = None) -> None:
     """Сохраняет отфильтрованный список в Excel. В файл добавляется скрытый лист с меткой и настройками колонок,
-    чтобы программа могла открыть его позже как отфильтрованный (detect_file_kind / read_filtered)."""
+    чтобы программа могла открыть его позже как отфильтрованный (detect_file_kind / read_filtered).
+    extra_headers/extra_rows — дополнительные колонки справа от отчётных (по строке на каждую строку списка): при чтении
+    файла они отбрасываются — в служебный лист записано число отчётных колонок."""
     wb = Workbook()
     ws = wb.active
     ws.title = f"Топ-{len(result.top)} должников"
     di = result.headers.index(debt_col)
-    ws.append(["№"] + result.headers)
+    extra_headers = list(extra_headers or [])
+    ws.append(["№"] + result.headers + extra_headers)
     for n, (row, amt) in enumerate(zip(result.top, result.amounts), 1):
         row = list(row)
         row[di] = amt
-        ws.append([n] + row)
+        extra = list(extra_rows[n - 1]) if extra_rows else []
+        ws.append([n] + row + (extra + [None] * (len(extra_headers) - len(extra))))
 
     bold = Font(bold=True)
     fill = PatternFill("solid", fgColor="DDEBF7")
@@ -428,7 +433,7 @@ def export(result: Result, path: str | Path, debt_col: str, meta: dict | None = 
     st.column_dimensions["B"].width = 18
 
     info = {"app": "debtors", "format": 1, "kind": "filtered", "debt_col": debt_col,
-            "headers": result.headers, "stats": result.stats, "created": date.today().isoformat()}
+            "headers": result.headers, "n_columns": len(result.headers), "stats": result.stats, "created": date.today().isoformat()}
     info.update(meta or {})
     ms = wb.create_sheet(META_SHEET)
     ms["A1"] = json.dumps(info, ensure_ascii=False)
@@ -476,6 +481,8 @@ def read_filtered(path: str | Path) -> dict:
         sheet = next(n for n in names if n not in (META_SHEET, STATS_SHEET))
         rows = [list(r) for r in wb[sheet].iter_rows(values_only=True)]
         headers = [str(h) for h in rows[0][1:] if h is not None]
+        if meta.get("n_columns"):
+            headers = headers[:int(meta["n_columns"])]            # колонки справа — добавленные программой при сохранении
         data = []
         for r in rows[1:]:
             if not (isinstance(r[0], (int, float)) and not isinstance(r[0], bool)):
