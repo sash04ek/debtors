@@ -66,14 +66,24 @@ def save_settings(s: core.Settings) -> None:
         pass
 
 
-def export_file_name(org_name: str, stem: str, n: int) -> str:
+def export_file_name(org_name: str, stem: str, n: int, offset: int = 0) -> str:
     """Имя файла для «Сохранить в Excel»: название организации (УК), исходное имя и число должников. Название не дублируется,
-    если оно уже есть в имени исходного файла (например, при пересохранении отфильтрованного списка)."""
+    если оно уже есть в имени исходного файла (например, при пересохранении отфильтрованного списка).
+    offset — порция «следующие N»: в имени номера должников («_топ21-40»), чтобы порции не перезаписывали друг друга."""
     org = claim.safe_name(re.sub(r"[«»\"]", "", org_name or "").strip())[:40].rstrip(" ._") if (org_name or "").strip() else ""
-    base = f"{stem}_топ{n}" if stem else "должники"
+    top = f"топ{n}" if not offset else f"топ{offset + 1}-{offset + n}"
+    base = f"{stem}_{top}" if stem else ("должники" if not offset else f"должники_{offset + 1}-{offset + n}")
     if org and org.lower() not in base.lower():
         base = f"{org}_{base}"
     return claim.safe_name(base)[:120].rstrip(" ._") + ".xlsx"
+
+
+def _int(v, default: int = 0) -> int:
+    """Целое из сохранённых данных (state.json, служебный лист); мусор — default."""
+    try:
+        return max(0, int(v))
+    except (TypeError, ValueError):
+        return default
 
 
 def make_tip(parent: tk.Misc, text: str) -> tk.Toplevel:
@@ -688,6 +698,11 @@ class App(tk.Tk):
         actions.pack(fill="x", **pad)
         self.filter_btn = ttk.Button(actions, text="Фильтровать", command=self.on_filter_button)
         self.filter_btn.pack(side="left")
+        # порции отбора: «топ-20» → «следующие 20» (21–40) и так далее, пока не закончатся должники
+        self.prev_batch_btn = ttk.Button(actions, text="◀ Предыдущие", command=lambda: self.shift_batch(-1), state="disabled")
+        self.prev_batch_btn.pack(side="left", padx=(6, 0))
+        self.next_batch_btn = ttk.Button(actions, text="Следующие ▶", command=lambda: self.shift_batch(1), state="disabled")
+        self.next_batch_btn.pack(side="left", padx=(6, 0))
         self.export_btn = ttk.Button(actions, text="Сохранить в Excel…", command=self.export, state="disabled")
         self.export_btn.pack(side="left", padx=6)
 
@@ -815,6 +830,8 @@ class App(tk.Tk):
         self.tree.bind(f"<{mod}-c>", lambda e: (self.copy_rows(), "break")[1])
         self.bind_all(f"<{mod}-f>", lambda e: (self.search_entry.focus_set(), self.search_entry.select_range(0, "end"), "break")[2])
         Tooltip(self.filter_btn, f"Применить или сбросить фильтр (F5, {'⌘' if mod == 'Command' else 'Ctrl+'}Enter)")
+        Tooltip(self.prev_batch_btn, "Предыдущая порция должников (по тем же настройкам отбора)")
+        Tooltip(self.next_batch_btn, "Следующая порция должников: после первых N — следующие N, пока не закончатся")
 
     def _select_all_rows(self):
         if self.focus_get() is self.tree:
@@ -1030,7 +1047,7 @@ class App(tk.Tk):
         if org:
             self.org_cb.set(org.name)
             self.org_hint.config(text="взята из отфильтрованного файла")
-        self.result = core.Result(headers, data["rows"], data["amounts"], data["stats"])
+        self.result = core.Result(headers, data["rows"], data["amounts"], data["stats"], offset=_int(meta.get("offset")))
         # порядок в файле — порядок, в котором он был сохранён; если в файле есть метка сортировки, показываем её,
         # иначе (файл прежней версии) список идёт по номерам
         self._display_result(meta.get("sort_col") or (debt_name if "sort_desc" in meta else None),
@@ -1038,7 +1055,9 @@ class App(tk.Tk):
         st = data["stats"]
         src = meta.get("source_file")
         self.stats_lbl.config(text=(
-            f"Отфильтрованный список: записей {len(self.result.top)} · сумма: {fmt_money(sum(self.result.amounts))}"
+            f"Отфильтрованный список: записей {len(self.result.top)}"
+            + (f" (№ {self.result.offset + 1}–{self.result.offset + len(self.result.top)})" if self.result.offset else "")
+            + f" · сумма: {fmt_money(sum(self.result.amounts))}"
             + (f" · исходный файл: {src}" if src else "")
             + (f" · строк в исходном: {st['всего строк']}" if st.get("всего строк") else "")))
         self.kind_lbl.config(text="· отфильтрованный список", style="Ok.TLabel")
@@ -1073,6 +1092,7 @@ class App(tk.Tk):
         self.result = None
         self.export_btn.config(state="disabled")
         self.docs_btn.config(state="disabled")
+        self.update_batch_buttons()
         org = orgmod.find_by_title(self.orgs, self.sheet.title)
         if org:
             self.org_cb.set(org.name)
@@ -1112,7 +1132,8 @@ class App(tk.Tk):
                 unchecked = [self._state_key(i) for i, on in enumerate(self.check_state) if not on]
             storage.save_json(STATE_PATH, "state", {
                 "file": str(self.path) if self.path else "", "sheet": self.sheet_cb.get(), "org": self.org_cb.get(),
-                "filtered": bool(self.result), "unchecked": unchecked})
+                "filtered": bool(self.result), "unchecked": unchecked,
+                "offset": self.result.offset if (self.result and self.kind == "original") else 0})
         except Exception:
             pass
 
@@ -1141,7 +1162,7 @@ class App(tk.Tk):
                 self.org_cb.set(st["org"])
                 self.org_hint.config(text="восстановлена с прошлого сеанса")
             if self.kind == "original" and st.get("filtered"):
-                self.run(quiet=True)                             # исходный файл: список строится заново
+                self.run(quiet=True, offset=_int(st.get("offset")))   # исходный файл: список (и его порция) строится заново
             if self.result:                                      # и для исходного, и для отфильтрованного файла
                 unchecked = set(st.get("unchecked") or [])
                 for i in range(len(self.check_state)):
@@ -1708,7 +1729,7 @@ class App(tk.Tk):
                     break
                 row = self.result.top[k]
                 addr, flat = orgmod.addr_flat(self.row_addr(row), row[fi])
-                fn = f"{k + 1:02d} " + claim.file_name(row[ni], addr, flat)
+                fn = f"{self.result.offset + k + 1:02d} " + claim.file_name(row[ni], addr, flat)
                 claim.build_claim(org, address=addr, flat=flat, debt=self.result.amounts[k],
                                   on_date=today, path=out / fn)
                 made += 1
@@ -1770,7 +1791,7 @@ class App(tk.Tk):
                     if prog.cancelled:
                         break
                     who = case.owner.fio if case.owner else "собственник не известен"
-                    num = f"{k + 1:02d}" + (f"-{j}" if len(cases) > 1 else "")
+                    num = f"{self.result.offset + k + 1:02d}" + (f"-{j}" if len(cases) > 1 else "")
                     fn = f"{num} " + claim.safe_name(
                         f"Заявление о судебном приказе {who} {info['address']} кв {claim.clean_flat(info['flat'])}") + ".docx"
                     no_court += 0 if court_obj else 1
@@ -1886,6 +1907,7 @@ class App(tk.Tk):
         for b in (self.export_btn, self.docs_btn):
             b.config(state="disabled")
         self.filter_btn.config(text="Фильтровать")
+        self.update_batch_buttons()
         self.save_state()
 
     # ---------- собственники и судебный приказ ----------
@@ -1991,8 +2013,9 @@ class App(tk.Tk):
             s.page_size = 50
         return s
 
-    def run(self, quiet: bool = False) -> bool:
-        """Фильтрует загруженный отчёт. quiet — без окон (восстановление при запуске). Возвращает True при успехе."""
+    def run(self, quiet: bool = False, offset: int = 0) -> bool:
+        """Фильтрует загруженный отчёт. quiet — без окон (восстановление при запуске). Возвращает True при успехе.
+        offset — сколько первых должников пропустить (порция «следующие N»); 0 — с начала списка."""
         if not self.sheet:
             if not quiet:
                 messagebox.showinfo("Нет данных", "Сначала откройте Excel-файл.")
@@ -2009,7 +2032,7 @@ class App(tk.Tk):
                 self.open_settings()
             return False
         try:
-            self.result = core.process(self.sheet, s, self.current_org())
+            self.result = core.process(self.sheet, s, self.current_org(), offset)
         except Exception as e:
             if not quiet:
                 messagebox.showerror("Ошибка", str(e))
@@ -2027,7 +2050,9 @@ class App(tk.Tk):
             f"Организация: {self.current_org().name} · строк: {st['всего строк']} · "
             + (f"не в управлении: {st['дома не в управлении']} · " if st.get("дома не в управлении") else "")
             + f"физлиц с долгом: {st['физлиц с долгом']} · "
-            f"отобрано: {st['отобрано']} · сумма: {fmt_money(st['сумма долга отобранных'])}"
+            + (f"отобрано: {st['отобрано']}" if not self.result.offset and st['отобрано'] >= st['физлиц с долгом']
+               else f"отобраны № {st['отобрано с №']}–{st['отобрано по №']} из {st['физлиц с долгом']}")
+            + f" · сумма: {fmt_money(st['сумма долга отобранных'])}"
         ))
         self.filter_btn.config(text="Сбросить фильтр")
         self.save_state()
@@ -2051,11 +2076,33 @@ class App(tk.Tk):
         state = "normal" if self.result.top else "disabled"
         for b in (self.export_btn, self.docs_btn):
             b.config(state=state)
+        self.update_batch_buttons()
+
+    def update_batch_buttons(self):
+        """«◀ Предыдущие N» / «Следующие N ▶»: доступны для отфильтрованного исходного отчёта, пока есть куда листать.
+        Отфильтрованный файл — уже готовая порция: листать нечего (нужен исходный отчёт)."""
+        r = self.result
+        n = max(1, int(self.settings.top_n or 20))
+        total = r.stats.get("физлиц с долгом", 0) if r else 0
+        can = bool(r and self.kind == "original" and r.top)
+        self.prev_batch_btn.config(text=f"◀ Предыдущие {n}",
+                                   state="normal" if can and r.offset > 0 else "disabled")
+        rest = max(0, total - (r.offset + len(r.top))) if can else 0
+        self.next_batch_btn.config(text=f"Следующие {min(n, rest) or n} ▶", state="normal" if rest else "disabled")
+
+    def shift_batch(self, step: int):
+        """Следующая (step=1) или предыдущая (step=-1) порция должников по тем же настройкам отбора.
+        Снятые галочки и сортировка кликом относятся к показанной порции; отметки о претензиях и карточки — к людям."""
+        if not self.result or self.kind != "original":
+            return
+        n = max(1, int(self.collect_settings().top_n))
+        self.run(offset=max(0, self.result.offset + step * n))
 
     def export(self):
         if not self.result:
             return
-        default = export_file_name(self.current_org().name, self.path.stem if self.path else "", len(self.result.top))
+        default = export_file_name(self.current_org().name, self.path.stem if self.path else "", len(self.result.top),
+                                   self.result.offset)
         p = filedialog.asksaveasfilename(defaultextension=".xlsx", initialfile=default,
                                          filetypes=[("Excel", "*.xlsx")])
         if not p:
@@ -2240,7 +2287,7 @@ class App(tk.Tk):
     def service_values(self, idx: int) -> list:
         if not self.has_checks:
             return []
-        return [("☑" if self.check_state[idx] else "☐"), idx + 1,
+        return [("☑" if self.check_state[idx] else "☐"), idx + 1 + (self.result.offset if self.result else 0),
                 self.card_marks[idx] if idx < len(self.card_marks) else "", "✓" if self.court_flags[idx] else "✗",
                 self.claim_marks[idx] if idx < len(self.claim_marks) else "",
                 self.court_marks[idx] if idx < len(self.court_marks) else ""]
